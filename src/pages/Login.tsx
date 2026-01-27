@@ -2,22 +2,80 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import { Car, Smartphone, Shield } from "lucide-react";
+import { Car, Smartphone, Shield, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { supabase } from "@/lib/supabase";
+import { toast } from "sonner";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 const Login = () => {
   const [isLogin, setIsLogin] = useState(true);
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Form State
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [role, setRole] = useState<"customer" | "driver">("customer");
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    navigate("/home");
+    setLoading(true);
+
+    try {
+      if (isLogin) {
+        // LOGIN
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (error) throw error;
+        toast.success("Welcome back!");
+        navigate("/home");
+      } else {
+        // SIGNUP
+        const { data: { user }, error: signUpError } = await supabase.auth.signUp({
+          email,
+          password,
+        });
+
+        if (signUpError) throw signUpError;
+        if (!user) throw new Error("No user created");
+
+        // Insert into profiles
+        const { error: profileError } = await supabase
+          .from("profiles")
+          .insert({
+            id: user.id,
+            email,
+            full_name: fullName,
+            phone_number: phone,
+            role,
+          });
+
+        if (profileError) {
+          // Note: In a real production app, if profile creation fails, we might want to delete the user or retry.
+          console.error("Profile creation error:", profileError);
+          toast.error("Account created but profile setup failed. Please contact support.");
+        } else {
+          toast.success("Account created successfully!");
+          navigate("/home");
+        }
+      }
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error.message || "An error occurred");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-primary/10 flex items-center justify-center p-4">
       <div className="w-full max-w-md animate-fade-in">
-        {/* Logo Section */}
         <div className="text-center mb-8 animate-scale-in">
           <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-r from-primary to-primary-hover rounded-2xl mb-4 shadow-[var(--shadow-button)]">
             <Car className="w-10 h-10 text-primary-foreground" />
@@ -26,8 +84,7 @@ const Login = () => {
           <p className="text-muted-foreground">Your reliable ride partner</p>
         </div>
 
-        {/* Auth Card */}
-        <Card className="card-taxi animate-slide-up">
+        <Card className="card-taxi animate-slide-up p-6">
           <div className="space-y-6">
             <div className="space-y-2 text-center">
               <h2 className="text-2xl font-semibold">
@@ -40,39 +97,95 @@ const Login = () => {
 
             <form onSubmit={handleSubmit} className="space-y-4">
               {!isLogin && (
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Full Name</label>
-                  <Input 
-                    placeholder="Enter your full name" 
-                    className="h-12 rounded-xl border-2 focus:border-primary"
-                  />
-                </div>
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="fullname">Full Name</Label>
+                    <Input
+                      id="fullname"
+                      placeholder="John Doe"
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      required
+                      className="h-12 rounded-xl border-2 focus:border-primary"
+                    />
+                  </div>
+                </>
               )}
-              
+
               <div className="space-y-2">
-                <label className="text-sm font-medium">Phone Number</label>
-                <Input 
-                  type="tel" 
-                  placeholder="+91 98765 43210" 
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="name@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
                   className="h-12 rounded-xl border-2 focus:border-primary"
                 />
               </div>
 
-              <Button 
-                type="submit" 
-                className="btn-taxi w-full h-12 text-lg"
+              {!isLogin && (
+                <div className="space-y-2">
+                  <Label htmlFor="phone">Phone Number</Label>
+                  <Input
+                    id="phone"
+                    type="tel"
+                    placeholder="+91 98765 43210"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    required
+                    className="h-12 rounded-xl border-2 focus:border-primary"
+                  />
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  className="h-12 rounded-xl border-2 focus:border-primary"
+                />
+              </div>
+
+              {!isLogin && (
+                <div className="space-y-3 pt-2">
+                  <Label>I want to join as a:</Label>
+                  <RadioGroup defaultValue="customer" onValueChange={(v) => setRole(v as "customer" | "driver")} className="flex space-x-4">
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="customer" id="r-customer" />
+                      <Label htmlFor="r-customer">Customer</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="driver" id="r-driver" />
+                      <Label htmlFor="r-driver">Driver</Label>
+                    </div>
+                  </RadioGroup>
+                </div>
+              )}
+
+              <Button
+                type="submit"
+                className="btn-taxi w-full h-12 text-lg mt-4"
+                disabled={loading}
               >
-                {isLogin ? "Sign In" : "Create Account"}
+                {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (isLogin ? "Sign In" : "Create Account")}
               </Button>
             </form>
 
             <div className="text-center">
               <button
                 onClick={() => setIsLogin(!isLogin)}
+                type="button"
                 className="text-primary font-medium hover:underline transition-[var(--transition-smooth)]"
               >
-                {isLogin 
-                  ? "Don't have an account? Sign up" 
+                {isLogin
+                  ? "Don't have an account? Sign up"
                   : "Already have an account? Sign in"
                 }
               </button>

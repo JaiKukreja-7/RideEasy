@@ -2,10 +2,10 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { 
-  ArrowLeft, 
-  MapPin, 
-  Calendar, 
+import {
+  ArrowLeft,
+  MapPin,
+  Calendar,
   Clock,
   Star,
   Receipt,
@@ -13,61 +13,56 @@ import {
   Filter
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { supabase } from "@/lib/supabase";
+import { useEffect } from "react";
 
 const TripHistory = () => {
   const [filter, setFilter] = useState("all");
   const navigate = useNavigate();
 
-  const trips = [
-    {
-      id: "TG001",
-      from: "Main Street, Downtown",
-      to: "Airport Terminal 1",
-      date: "Today, 2:30 PM",
-      fare: "₹216",
-      status: "completed",
-      driver: "Rajesh Kumar",
-      rating: 5,
-      vehicle: "Swift Dzire",
-      duration: "25 min"
-    },
-    {
-      id: "TG002",
-      from: "Office Complex",
-      to: "Shopping Mall",
-      date: "Yesterday, 6:45 PM",
-      fare: "₹180",
-      status: "completed",
-      driver: "Amit Singh",
-      rating: 4,
-      vehicle: "Honda City",
-      duration: "18 min"
-    },
-    {
-      id: "TG003",
-      from: "Home",
-      to: "Metro Station",
-      date: "Dec 15, 8:20 AM",
-      fare: "₹95",
-      status: "completed",
-      driver: "Suresh Yadav",
-      rating: 5,
-      vehicle: "Maruti Baleno",
-      duration: "12 min"
-    },
-    {
-      id: "TG004",
-      from: "Restaurant District",
-      to: "Hotel Paradise",
-      date: "Dec 14, 11:30 PM",
-      fare: "₹145",
-      status: "cancelled",
-      driver: null,
-      rating: null,
-      vehicle: null,
-      duration: null
+  const [trips, setTrips] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchTrips();
+  }, []);
+
+  const fetchTrips = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('rides')
+        .select(`
+          *,
+          driver:profiles!rides_driver_id_fkey(full_name)
+        `)
+        .eq('customer_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const formattedTrips = data.map(ride => ({
+        id: ride.id.slice(0, 8).toUpperCase(), // Short ID
+        from: ride.pickup_address,
+        to: ride.dropoff_address,
+        date: new Date(ride.created_at).toLocaleDateString() + ", " + new Date(ride.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        fare: "₹" + ride.fare_amount,
+        status: ride.status,
+        driver: ride.driver?.full_name || "Assigned Driver",
+        rating: 5, // Placeholder as we don't have ratings table yet
+        vehicle: "Taxi", // Placeholder
+        duration: "25 min" // Placeholder
+      }));
+
+      setTrips(formattedTrips);
+    } catch (error) {
+      console.error('Error fetching history:', error);
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -80,8 +75,8 @@ const TripHistory = () => {
     }
   };
 
-  const filteredTrips = filter === "all" 
-    ? trips 
+  const filteredTrips = filter === "all"
+    ? trips
     : trips.filter(trip => trip.status === filter);
 
   return (
@@ -89,9 +84,9 @@ const TripHistory = () => {
       {/* Header */}
       <div className="bg-card border-b border-border/50 px-4 py-4">
         <div className="flex items-center space-x-4">
-          <Button 
-            variant="ghost" 
-            size="icon" 
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => navigate("/home")}
             className="rounded-xl"
           >
@@ -120,11 +115,10 @@ const TripHistory = () => {
               variant={filter === tab.id ? "default" : "outline"}
               size="sm"
               onClick={() => setFilter(tab.id)}
-              className={`rounded-xl ${
-                filter === tab.id 
-                  ? 'bg-primary text-primary-foreground' 
-                  : 'border-border hover:bg-muted'
-              }`}
+              className={`rounded-xl ${filter === tab.id
+                ? 'bg-primary text-primary-foreground'
+                : 'border-border hover:bg-muted'
+                }`}
             >
               {tab.label}
             </Button>
@@ -134,8 +128,8 @@ const TripHistory = () => {
         {/* Trip Cards */}
         <div className="space-y-4">
           {filteredTrips.map((trip, index) => (
-            <Card 
-              key={trip.id} 
+            <Card
+              key={trip.id}
               className="card-taxi-interactive animate-slide-up"
               style={{ animationDelay: `${index * 100}ms` }}
             >
@@ -151,7 +145,7 @@ const TripHistory = () => {
                       <p className="text-sm text-muted-foreground">{trip.date}</p>
                     </div>
                   </div>
-                  
+
                   <div className="text-right">
                     <p className="font-bold text-lg">{trip.fare}</p>
                     <Badge className={`text-xs border ${getStatusColor(trip.status)}`}>
@@ -185,7 +179,7 @@ const TripHistory = () => {
                         <span className="font-medium">{trip.rating}</span>
                       </div>
                     </div>
-                    
+
                     <div className="flex items-center justify-between text-sm text-muted-foreground">
                       <div className="flex items-center space-x-2">
                         <Car className="w-4 h-4" />
@@ -219,7 +213,7 @@ const TripHistory = () => {
 
         {/* Book New Ride */}
         <div className="animate-scale-in pt-4">
-          <Button 
+          <Button
             onClick={() => navigate("/home")}
             className="btn-taxi w-full h-14 text-lg font-semibold"
           >
