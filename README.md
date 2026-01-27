@@ -1,73 +1,80 @@
-# Welcome to your Lovable project
+# RideEasy - Your Reliable Ride Partner 🚖
 
-## Project info
+RideEasy is a modern cab booking application offering reliable rides, professional drivers, and affordable fares. **We are revolutionizing the ride-hailing industry with a ZERO COMMISSION model.** Instead of per-ride commissions, we offer flexible **Monthly, Quarterly, and Annual subscription plans** for drivers, ensuring they keep 100% of their hard-earned money.
 
-**URL**: https://lovable.dev/projects/731f284d-6f91-422d-9f23-78307d966642
+**Live Demo:** [https://ride-easy-v2.vercel.app/](https://ride-easy-v2.vercel.app/)
 
-## How can I edit this code?
+## 🚀 Features
 
-There are several ways of editing your application.
+- **Zero Commission Model**: Drivers subscribe to Monthly, Quarterly, or Annual plans and keep 100% of their ride fares.
+- **Easy Booking**: Quick and intuitive interface for passengers to book a ride in seconds.
+- **Real-time Tracking**: Interactive maps powered by Leaflet to track your ride status.
+- **Secure Payments**: Integrated with Stripe for seamless subscription management and ride payments.
+- **User Authentication**: Secure sign-up and login via Supabase for both Drivers and Passengers.
+- **Responsive Design**: Fully optimized for mobile and desktop devices.
+- **Modern UI**: Clean and accessible interface built with shadcn/ui and Tailwind CSS.
 
-**Use Lovable**
+## 🛠️ Tech Stack
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/731f284d-6f91-422d-9f23-78307d966642) and start prompting.
+- **Frontend**: React, TypeScript, Vite
+- **Styling**: Tailwind CSS, shadcn/ui, Lucide React (Icons)
+- **State Management**: TanStack Query (React Query)
+- **Routing**: React Router DOM v6
+- **Maps**: Leaflet, React Leaflet
+- **Forms & Validation**: React Hook Form, Zod
+- **Backend / BaaS**: Supabase (Auth, Database, Realtime)
+- **Payments**: Stripe (Handling Subscriptions & Payments)
+- **Charts**: Recharts
 
-Changes made via Lovable will be committed automatically to this repo.
+## 📦 Getting Started
 
-**Use your preferred IDE**
+Follow these steps to set up the project locally.
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+### Prerequisites
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+- Node.js & npm (or bun/yarn/pnpm)
+- A Supabase project
+- A Stripe account
 
-Follow these steps:
+### Installation
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+1.  **Clone the repository**
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+    ```bash
+    git clone <YOUR_GIT_URL>
+    cd yellow-cab-go
+    ```
 
-# Step 3: Install the necessary dependencies.
-npm i
+2.  **Install dependencies**
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
+    ```bash
+    npm install
+    # or
+    bun install
+    ```
 
-**Edit a file directly in GitHub**
+3.  **Environment Setup**
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+    Create a `.env` file in the root directory and add your keys:
 
-**Use GitHub Codespaces**
+    ```env
+    VITE_SUPABASE_URL=your_supabase_url
+    VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+    VITE_STRIPE_PUBLISHABLE_KEY=your_stripe_publishable_key
+    ```
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+4.  **Run the development server**
 
-## What technologies are used for this project?
+    ```bash
+    npm run dev
+    ```
 
-This project is built with:
+    The app should now be running on `http://localhost:8080` (or whatever port Vite selects).
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+## 🤝 Contributing
 
-## How can I deploy this project?
+Contributions are welcome! Please feel free to submit a Pull Request.
 
-Simply open [Lovable](https://lovable.dev/projects/731f284d-6f91-422d-9f23-78307d966642) and click on Share -> Publish.
+## 📄 License
 
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+This project is licensed under the MIT License.
