@@ -13,6 +13,7 @@ import TripHistory from "./pages/TripHistory";
 import NotFound from "./pages/NotFound";
 import DriverDashboard from "./pages/DriverDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
+import TrackRide from "./pages/TrackRide";
 
 const queryClient = new QueryClient();
 
@@ -32,6 +33,7 @@ const App = () => (
             <Route path="/trip-history" element={<TripHistory />} />
             <Route path="/driver-dashboard" element={<DriverDashboard />} />
             <Route path="/admin-dashboard" element={<AdminDashboard />} />
+            <Route path="/track/:rideId" element={<TrackRide />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

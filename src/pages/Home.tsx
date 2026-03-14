@@ -15,10 +15,12 @@ import {
   Car
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-// import mapImage from "@/assets/map-interface.jpg"; // REMOVED
 import { useAuth } from "@/context/AuthContext";
+import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
-import LeafletMap from "@/components/LeafletMap";
+import { Badge } from "@/components/ui/badge";
+import { getReliableLocation } from "@/utils/geolocation";
+import MapLibreMap from "@/components/MapLibreMap";
 
 const Home = () => {
   const [pickup, setPickup] = useState("");
@@ -41,18 +43,73 @@ const Home = () => {
     }
   }, [user, role, loading, navigate]);
 
-  // Generate random drivers
+  // Initial user location with reliable utility
   useEffect(() => {
-    const baseLat = 19.0760;
-    const baseLng = 72.8777;
-    const drivers = Array.from({ length: 4 }).map((_, i) => ({
-      id: `driver-${i}`,
-      lat: baseLat + (Math.random() - 0.5) * 0.02,
-      lng: baseLng + (Math.random() - 0.5) * 0.02,
-      angle: Math.random() * 360
-    }));
-    setNearbyDrivers(drivers);
+    let mounted = true;
+    if (!pickup) {
+        getReliableLocation().then(async (loc) => {
+            if (!mounted) return;
+            setPickupCoords({ lat: loc.lat, lng: loc.lng });
+            // Reverse geocode
+            try {
+               const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${loc.lat}&lon=${loc.lng}`, {
+                   headers: {
+                       'Accept-Language': 'en-US,en;q=0.9',
+                       // Nominatim requires User-Agent for free tier
+                       'User-Agent': 'RideEasy/1.0 (Contact: local@dev.com)'
+                   }
+               });
+               if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+               const data = await res.json();
+               if (data.display_name && mounted) {
+                   setPickup(data.display_name.split(',').slice(0, 3).join(','));
+               }
+            } catch (e) { 
+                console.error("Geocoding failed, using coordinates:", e);
+                if (mounted) setPickup("Current Location");
+            }
+        });
+    }
+    return () => { mounted = false; };
   }, []);
+
+  // REAL-TIME DRIVERS FETCH & LISTEN
+  useEffect(() => {
+    fetchOnlineDrivers();
+
+    const channel = supabase
+      .channel('driver-locations')
+      .on('postgres_changes', { 
+         event: '*', 
+         schema: 'public', 
+         table: 'driver_locations',
+         filter: 'is_online=eq.true'
+      }, () => {
+         fetchOnlineDrivers();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const fetchOnlineDrivers = async () => {
+    const { data, error } = await supabase
+      .from('driver_locations')
+      .select('*')
+      .eq('is_online', true)
+      .eq('is_busy', false);
+    
+    if (data) {
+      setNearbyDrivers(data.map(d => ({
+        id: d.user_id,
+        lat: Number(d.lat),
+        lng: Number(d.lng),
+        angle: 0
+      })));
+    }
+  };
 
   const handleLogout = async () => {
     await signOut();
@@ -109,6 +166,10 @@ const Home = () => {
   };
 
   const handleBookRide = () => {
+    if (!pickupCoords || !destinationCoords) {
+        toast.error("Please select both pickup and destination locations");
+        return;
+    }
     navigate("/book-ride", {
       state: {
         pickup,
@@ -120,16 +181,16 @@ const Home = () => {
   };
 
   const quickActions = [
-    { icon: HomeIcon, label: "Home", address: "123 Main Street", onClick: () => setDestination("123 Main Street") },
-    { icon: Briefcase, label: "Work", address: "Business Center", onClick: () => setDestination("Business Center") },
-    { icon: Clock, label: "History", address: "View Your Rides", onClick: () => navigate("/trip-history") },
-    { icon: Heart, label: "Favorites", address: "Airport", onClick: () => setDestination("Airport") }
+    { icon: HomeIcon, label: "Home", address: "Saved", onClick: () => handleSearchInput("Home", "destination") },
+    { icon: Briefcase, label: "Work", address: "Saved", onClick: () => handleSearchInput("Work", "destination") },
+    { icon: Clock, label: "History", address: "Recent", onClick: () => navigate("/trip-history") },
+    { icon: Heart, label: "Loved", address: "Favs", onClick: () => {} }
   ];
 
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background pb-10">
       {/* Header */}
       <div className="bg-card border-b border-border/50 px-4 py-3">
         <div className="flex items-center justify-between">
@@ -138,71 +199,79 @@ const Home = () => {
               <Menu className="w-5 h-5" />
             </Button>
             <div>
-              <p className="text-sm text-muted-foreground">Welcome</p>
-              <p className="font-semibold">{user?.email}</p>
-              {role && <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full uppercase">{role}</span>}
+              <p className="text-sm text-muted-foreground leading-none mb-1">Welcome</p>
+              <p className="font-bold text-sm truncate max-w-[150px]">{user?.email}</p>
             </div>
           </div>
-          <Button variant="ghost" size="icon" className="rounded-xl" onClick={handleLogout}>
-            <LogOut className="w-5 h-5" />
-          </Button>
+          <div className="flex items-center space-x-2">
+            <Badge variant="secondary" className="bg-primary/10 text-primary border-0 font-bold text-[10px]">
+              {role?.toUpperCase()}
+            </Badge>
+            <Button variant="ghost" size="icon" className="rounded-xl text-muted-foreground" onClick={handleLogout}>
+              <LogOut className="w-5 h-5" />
+            </Button>
+          </div>
         </div>
       </div>
 
-      <div className="p-4 space-y-6">
-
-        {/* Role Specific Actions */}
-        {role === 'driver' && (
-          <Card className="bg-primary text-primary-foreground p-4 mb-4 cursor-pointer" onClick={() => navigate('/driver-dashboard')}>
-            <div className="flex items-center space-x-3">
-              <Car className="w-6 h-6" />
-              <div>
-                <h3 className="font-bold">Driver Dashboard</h3>
-                <p className="text-sm opacity-90">Manage your rides</p>
-              </div>
-            </div>
-          </Card>
-        )}
-
-        {role === 'admin' && (
-          <Card className="bg-destructive text-destructive-foreground p-4 mb-4 cursor-pointer" onClick={() => navigate('/admin-dashboard')}>
-            <div>
-              <h3 className="font-bold">Admin Panel</h3>
-              <p className="text-sm opacity-90">Manage system</p>
-            </div>
-          </Card>
-        )}
-
+      <div className="p-4 space-y-4 max-w-2xl mx-auto">
         {/* Map Section */}
-        <Card className="card-taxi overflow-hidden animate-fade-in border-0 p-0">
-          <div className="relative isolate z-0">
-            <LeafletMap
-              height="250px"
-              onLocationSelect={handleMapLocationSelect}
-              selectingMode={activeInput}
-              drivers={nearbyDrivers}
-            />
-          </div>
+        <Card className="card-taxi overflow-hidden animate-fade-in border-0 p-0 shadow-lg relative h-[300px]">
+          <MapLibreMap 
+            height="100%"
+            center={pickupCoords ? [pickupCoords.lng, pickupCoords.lat] : [72.8777, 19.0760]}
+            drivers={nearbyDrivers}
+            pickup={pickupCoords ? [pickupCoords.lng, pickupCoords.lat] : undefined}
+            destination={destinationCoords ? [destinationCoords.lng, destinationCoords.lat] : undefined}
+            onMapClick={(lng, lat) => {
+              if (activeInput === "pickup") {
+                setPickupCoords({ lat, lng });
+                fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`, {
+                  headers: { 'Accept-Language': 'en-US', 'User-Agent': 'RideEasy/1.0' }
+                })
+                  .then(r => r.ok ? r.json() : ({}))
+                  .then((data: any) => {
+                    if (data.display_name) setPickup(data.display_name.split(',').slice(0, 3).join(','));
+                    else setPickup(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+                  })
+                  .catch(() => setPickup(`${lat.toFixed(4)}, ${lng.toFixed(4)}`));
+              } else {
+                setDestinationCoords({ lat, lng });
+                fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`, {
+                  headers: { 'Accept-Language': 'en-US', 'User-Agent': 'RideEasy/1.0' }
+                })
+                  .then(r => r.ok ? r.json() : ({}))
+                  .then((data: any) => {
+                    if (data.display_name) setDestination(data.display_name.split(',').slice(0, 3).join(','));
+                    else setDestination(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+                  })
+                  .catch(() => setDestination(`${lat.toFixed(4)}, ${lng.toFixed(4)}`));
+              }
+            }}
+          />
         </Card>
 
         {/* Search Section */}
-        <Card className="card-taxi animate-slide-up">
+        <Card className="card-taxi animate-slide-up relative overflow-visible z-10 border-0 shadow-xl bg-card">
           <div className="space-y-4">
-            <h3 className="font-semibold text-lg">Where to?</h3>
+            <h3 className="font-bold text-lg flex items-center">
+               <Navigation className="w-4 h-4 mr-2 text-primary" />
+               Where to?
+            </h3>
 
             <div className="space-y-3 relative">
               {/* Suggestions Dropdown */}
               {suggestions.length > 0 && (
-                <div className="absolute top-full left-0 right-0 z-[500] bg-popover text-popover-foreground rounded-xl shadow-lg border border-border mt-2 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                <div className="absolute top-full left-0 right-0 z-[1000] bg-popover text-popover-foreground rounded-xl shadow-2xl border border-border mt-2 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                   <div className="p-1">
                     {suggestions.map((place, i) => (
                       <button
                         key={i}
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-muted rounded-lg transition-colors flex items-center space-x-2"
+                        className="w-full text-left px-4 py-3 text-sm hover:bg-muted rounded-lg transition-colors flex items-center space-x-3 border-b border-border/10 last:border-0"
                         onClick={() => handleSuggestionClick(place)}
                       >
-                        <MapPin className="w-4 h-4 text-muted-foreground shrink-0" />
-                        <span className="truncate">{place.display_name}</span>
+                        <MapPin className="w-4 h-4 text-primary shrink-0" />
+                        <span className="truncate font-medium">{place.display_name}</span>
                       </button>
                     ))}
                   </div>
@@ -210,28 +279,28 @@ const Home = () => {
               )}
 
               <div className="relative">
-                <div className="absolute left-3 top-1/2 transform -translate-y-1/2 z-10">
-                  <div className={`w-3 h-3 rounded-full ${activeInput === 'pickup' ? 'bg-primary ring-4 ring-primary/20' : 'bg-muted-foreground'}`}></div>
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 z-10">
+                  <div className={`w-3 h-3 rounded-full ${activeInput === 'pickup' ? 'bg-primary ring-4 ring-primary/20' : 'bg-muted-foreground/30'}`}></div>
                 </div>
                 <Input
                   placeholder="Pickup location"
                   value={pickup}
                   onChange={(e) => handleSearchInput(e.target.value, "pickup")}
                   onFocus={() => setActiveInput("pickup")}
-                  className={`pl-10 h-12 rounded-xl border-2 transition-colors ${activeInput === 'pickup' ? 'border-primary' : 'border-border'}`}
+                  className={`pl-11 h-14 rounded-xl border-2 transition-all duration-300 bg-muted/20 ${activeInput === 'pickup' ? 'border-primary bg-background' : 'border-transparent'}`}
                 />
               </div>
 
               <div className="relative">
-                <div className="absolute left-3 top-1/2 transform -translate-y-1/2 z-10">
-                  <MapPin className={`w-4 h-4 ${activeInput === 'destination' ? 'text-destructive animate-bounce' : 'text-muted-foreground'}`} />
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 z-10">
+                  <MapPin className={`w-4 h-4 ${activeInput === 'destination' ? 'text-destructive animate-bounce' : 'text-muted-foreground/30'}`} />
                 </div>
                 <Input
-                  placeholder="Where to?"
+                  placeholder="Search destination"
                   value={destination}
                   onChange={(e) => handleSearchInput(e.target.value, "destination")}
                   onFocus={() => setActiveInput("destination")}
-                  className={`pl-10 h-12 rounded-xl border-2 transition-colors ${activeInput === 'destination' ? 'border-primary' : 'border-border'}`}
+                  className={`pl-11 h-14 rounded-xl border-2 transition-all duration-300 bg-muted/20 ${activeInput === 'destination' ? 'border-primary bg-background' : 'border-transparent'}`}
                 />
               </div>
             </div>
@@ -240,21 +309,21 @@ const Home = () => {
 
         {/* Quick Actions */}
         <div className="animate-fade-in">
-          <h3 className="font-semibold mb-3">Quick Actions</h3>
+          <h3 className="font-bold text-sm mb-3">Quick Actions</h3>
           <div className="grid grid-cols-2 gap-3">
             {quickActions.map((action, index) => (
               <Card
                 key={index}
-                className="card-taxi-interactive"
+                className="card-taxi-interactive hover:bg-muted/50 transition-colors p-4"
                 onClick={action.onClick}
               >
                 <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-taxi-yellow-light rounded-xl flex items-center justify-center">
+                  <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center">
                     <action.icon className="w-5 h-5 text-primary" />
                   </div>
-                  <div className="flex-1">
-                    <p className="font-medium">{action.label}</p>
-                    <p className="text-sm text-muted-foreground">{action.address}</p>
+                  <div className="flex-1 overflow-hidden">
+                    <p className="font-bold text-xs truncate">{action.label}</p>
+                    <p className="text-[10px] text-muted-foreground truncate uppercase font-black tracking-widest">{action.address}</p>
                   </div>
                 </div>
               </Card>
@@ -262,13 +331,14 @@ const Home = () => {
           </div>
         </div>
 
-        {/* Book Ride Button */}
-        <div className="animate-scale-in">
+        {/* Request Button */}
+        <div className="animate-scale-in pt-2">
           <Button
             onClick={handleBookRide}
-            className="btn-taxi w-full h-14 text-lg font-semibold"
+            className="btn-taxi w-full h-16 text-lg font-black shadow-xl shadow-primary/20 group"
           >
-            Book Your Ride
+            REQUEST RIDE NOW
+            <Car className="ml-2 w-5 h-5 group-hover:translate-x-1" />
           </Button>
         </div>
       </div>

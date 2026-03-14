@@ -13,13 +13,17 @@ import {
   Clock,
   MapPin,
   Shield,
-  Loader2
+  Loader2,
+  CheckCircle2,
+  CreditCard,
+  Share2,
+  Copy
 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 
-import LeafletMap from "@/components/LeafletMap";
+import MapLibreMap from "@/components/MapLibreMap";
 
 interface Ride {
   id: string;
@@ -39,10 +43,20 @@ const RideDetails = () => {
   const [ride, setRide] = useState<Ride | null>(null);
   const [loading, setLoading] = useState(true);
   const [routePath, setRoutePath] = useState<[number, number][]>([]);
+  const [driverLoc, setDriverLoc] = useState<{lat: number, lng: number} | null>(null);
+  const [liveStats, setLiveStats] = useState({ distance: 0, duration: 0 });
+  const [hasRated, setHasRated] = useState(false);
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const rideId = searchParams.get("id");
   const isTracking = searchParams.get("track") === "true";
+
+  const tripSharingLink = `${window.location.origin}/track/${rideId}`;
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(tripSharingLink);
+    toast.success("Link copied! Share it with friends and family.");
+  };
 
   useEffect(() => {
     if (!rideId) {
@@ -63,7 +77,9 @@ const RideDetails = () => {
         filter: `id=eq.${rideId}`
       }, (payload) => {
         setRide(payload.new as Ride);
-        toast.info(`Ride status updated: ${payload.new.status}`);
+        if (payload.new.status !== payload.old.status) {
+           toast.info(`Ride status: ${payload.new.status.toUpperCase()}`);
+        }
       })
       .subscribe();
 
@@ -72,25 +88,79 @@ const RideDetails = () => {
     };
   }, [rideId, navigate]);
 
-  // Fetch Route when ride data is available and tracking is on
+  // Fetch Route when ride data is available
   useEffect(() => {
-    if (ride && isTracking && ride.pickup_lat && ride.dropoff_lat) {
+    if (ride && ride.pickup_lat && ride.dropoff_lat) {
       fetchRoute(ride.pickup_lat, ride.pickup_lng, ride.dropoff_lat, ride.dropoff_lng);
     }
-  }, [ride, isTracking]);
+    
+    // If assigned, watch driver
+    if (ride?.driver_id) {
+       subscribeToDriver(ride.driver_id);
+    }
+  }, [ride]);
+
+  const subscribeToDriver = (driverId: string) => {
+     // Fetch initial
+     supabase.from('driver_locations').select('*').eq('user_id', driverId).single().then(({data}) => {
+        if (data) setDriverLoc({lat: Number(data.lat), lng: Number(data.lng)});
+     });
+
+     // Listen
+     return supabase.channel(`driver:${driverId}`)
+        .on('postgres_changes', { 
+            event: 'UPDATE', 
+            schema: 'public', 
+            table: 'driver_locations', 
+            filter: `user_id=eq.${driverId}` 
+        }, (payload) => {
+            setDriverLoc({lat: Number(payload.new.lat), lng: Number(payload.new.lng)});
+        })
+        .subscribe();
+  };
+
+  // Update live ETA when driver moves
+  useEffect(() => {
+    if (driverLoc && ride?.dropoff_lat) {
+        updateLiveETA();
+    }
+  }, [driverLoc]);
+
+  const updateLiveETA = async () => {
+      if (!driverLoc || !ride) return;
+      try {
+        const destLat = (ride.status === 'accepted' || ride.status === 'arrived') ? ride.pickup_lat : ride.dropoff_lat;
+        const destLng = (ride.status === 'accepted' || ride.status === 'arrived') ? ride.pickup_lng : ride.dropoff_lng;
+
+        const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${driverLoc.lng},${driverLoc.lat};${destLng},${destLat}?overview=false`);
+        const data = await res.json();
+        if (data.routes && data.routes[0]) {
+            setLiveStats({
+                distance: data.routes[0].distance / 1000,
+                duration: data.routes[0].duration / 60
+            });
+        }
+      } catch (e) {
+          console.error(e);
+      }
+  };
 
   const fetchRoute = async (startLat: number, startLng: number, endLat: number, endLng: number) => {
     try {
-      // OSRM Public API
       const url = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
       const res = await fetch(url);
       const data = await res.json();
 
       if (data.routes && data.routes.length > 0) {
         const coordinates = data.routes[0].geometry.coordinates;
-        // GeoJSON is [lng, lat], Leaflet needs [lat, lng]
         const leafletCoords = coordinates.map((coord: number[]) => [coord[1], coord[0]] as [number, number]);
         setRoutePath(leafletCoords);
+        if (liveStats.distance === 0) {
+            setLiveStats({
+                distance: data.routes[0].distance / 1000,
+                duration: data.routes[0].duration / 60
+            });
+        }
       }
     } catch (e) {
       console.error("Routing Error", e);
@@ -127,198 +197,247 @@ const RideDetails = () => {
   if (!ride) return <div className="min-h-screen flex items-center justify-center">Ride not found</div>;
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
-      <div className="bg-card border-b border-border/50 px-4 py-4">
+      <div className="bg-card border-b border-border/50 px-4 py-4 sticky top-0 z-50 backdrop-blur-md bg-opacity-80">
         <div className="flex items-center space-x-4">
           <Button
             variant="ghost"
             size="icon"
             onClick={() => navigate(isTracking ? "/trip-history" : "/home")}
-            className="rounded-xl"
+            className="rounded-xl hover:bg-primary/10"
           >
             <ArrowLeft className="w-5 h-5" />
           </Button>
           <div className="flex-1">
-            <h1 className="text-xl font-semibold">{isTracking ? "Live Tracking" : "Your Ride"}</h1>
-            <p className="text-sm text-primary">{statusMessages[ride.status] || ride.status}</p>
+            <h1 className="text-xl font-bold tracking-tight">{isTracking ? "Live Tracking" : "Your Ride"}</h1>
+            <p className="text-xs text-primary font-medium uppercase tracking-wider">{statusMessages[ride.status] || ride.status}</p>
           </div>
         </div>
       </div>
 
-      <div className="p-4 space-y-6">
+      <div className="p-4 space-y-6 max-w-2xl mx-auto">
 
         {/* LIVE TRACKING MAP */}
-        {isTracking && (
-          <Card className="card-taxi overflow-hidden h-[300px] border-0 p-0 relative animate-fade-in">
-            <LeafletMap
-              height="300px"
-              route={routePath}
-              // Pass a dummy driver at start position to simulate car
-              drivers={[{ id: 'my-taxi', lat: ride.pickup_lat || 0, lng: ride.pickup_lng || 0, angle: 0 }]}
-            />
-            <div className="absolute bottom-4 left-4 right-4 bg-white/90 backdrop-blur p-3 rounded-xl shadow-lg border border-border/50 z-[400]">
-              <div className="flex justify-between items-center">
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase font-bold">Est. Arrival</p>
-                  <p className="text-lg font-bold text-primary">12 mins</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs text-muted-foreground uppercase font-bold">Distance</p>
-                  <p className="text-lg font-bold">5.2 km</p>
-                </div>
+        {(isTracking || ride.status === 'accepted' || ride.status === 'in_progress') && (
+          <Card className="card-taxi overflow-hidden h-[350px] border-0 p-0 relative animate-fade-in shadow-2xl ring-1 ring-primary/10">
+            <div className="flex-1 relative h-full">
+              <MapLibreMap
+                height="100%"
+                drivers={driverLoc ? [{ id: ride.driver_id, lat: driverLoc.lat, lng: driverLoc.lng }] : []}
+                route={routePath}
+                pickup={[ride.pickup_lng, ride.pickup_lat]}
+                destination={[ride.dropoff_lng, ride.dropoff_lat]}
+                center={driverLoc ? [driverLoc.lng, driverLoc.lat] : [ride.pickup_lng, ride.pickup_lat]}
+              />
+
+              {/* Floating Trip Info */}
+              <div className="absolute top-4 left-4 right-4 space-y-2">
+                  <Card className="p-3 bg-background/90 backdrop-blur border-0 shadow-lg flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                          <div className="p-2 bg-primary/10 rounded-full">
+                              <Clock className="w-4 h-4 text-primary" />
+                          </div>
+                          <div>
+                              <p className="text-[10px] text-muted-foreground uppercase font-bold">Estimated Arrival</p>
+                              <p className="font-bold">{Math.round(liveStats.duration)} mins away</p>
+                          </div>
+                      </div>
+                      <div className="text-right">
+                          <p className="text-[10px] text-muted-foreground uppercase font-bold">Distance</p>
+                          <p className="font-bold">{liveStats.distance.toFixed(1)} km</p>
+                      </div>
+                  </Card>
+
+                  <div className="flex justify-center">
+                      <Badge variant="secondary" className="bg-background/90 backdrop-blur text-primary border-primary/20 px-4 py-1.5 shadow-md">
+                          <Shield className="w-3 h-3 mr-2" />
+                          Trip Sharing Active
+                      </Badge>
+                  </div>
               </div>
             </div>
           </Card>
         )}
 
-        {/* Ride Status (Hide if tracking to avoid clutter, or keep small) */}
-        {!isTracking && (
-          <Card className="card-taxi animate-fade-in">
-            <div className="text-center space-y-4">
-              <div className="w-20 h-20 bg-gradient-to-r from-primary to-primary-hover rounded-full flex items-center justify-center mx-auto">
-                {ride.status === "requested" ? (
-                  <Car className="w-10 h-10 text-primary-foreground animate-pulse" />
-                ) : (
-                  <Navigation className="w-10 h-10 text-primary-foreground" />
-                )}
+        {/* Trip Sharing Link */}
+        {(isTracking || ride.status === 'accepted' || ride.status === 'in_progress') && (
+          <Card className="card-taxi p-4 animate-fade-in shadow-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <Share2 className="w-5 h-5 text-primary" />
+                <div>
+                  <p className="font-bold text-sm">Share Trip</p>
+                  <p className="text-xs text-muted-foreground truncate max-w-[200px] sm:max-w-full">{tripSharingLink}</p>
+                </div>
+              </div>
+              <Button variant="outline" size="icon" onClick={copyToClipboard} className="shrink-0">
+                <Copy className="w-4 h-4" />
+              </Button>
+            </div>
+          </Card>
+        )}
+
+        {/* Ride Status Card (Only if requested) */}
+        {ride.status === "requested" && (
+          <Card className="card-taxi p-8 animate-fade-in text-center relative overflow-hidden">
+            <div className="absolute -top-10 -right-10 w-40 h-40 bg-primary/5 rounded-full blur-3xl"></div>
+            <div className="relative z-10 space-y-6">
+              <div className="w-24 h-24 bg-gradient-to-br from-primary to-primary-hover rounded-3xl flex items-center justify-center mx-auto shadow-lg shadow-primary/20 rotate-3">
+                <Car className="w-12 h-12 text-primary-foreground animate-pulse" />
               </div>
 
               <div>
-                <h3 className="text-xl font-semibold mb-2">
-                  {ride.status === "requested" ? "Searching for driver..." : "Driver Found!"}
-                </h3>
-                <p className="text-muted-foreground">{statusMessages[ride.status] || ride.status}</p>
+                <h3 className="text-2xl font-bold mb-2 tracking-tight">Searching for Drivers</h3>
+                <p className="text-muted-foreground font-medium">{statusMessages[ride.status]}</p>
               </div>
 
-              {ride.status === "requested" && (
-                <div className="flex justify-center">
-                  <div className="flex space-x-1">
-                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                  </div>
-                </div>
-              )}
+              <div className="flex justify-center items-center space-x-2">
+                <div className="w-2 h-2 bg-primary rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                <div className="w-2 h-2 bg-primary rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                <div className="w-2 h-2 bg-primary rounded-full animate-bounce"></div>
+              </div>
             </div>
           </Card>
         )}
 
-        {/* Show Driver Details Only if Accepted */}
+        {/* Driver Details (If Accepted) */}
         {ride.status !== "requested" && ride.status !== "cancelled" && (
-          <>
-            {/* Driver Info */}
-            <Card className="card-taxi animate-scale-in">
-              <div className="space-y-4">
-                <div className="flex items-center space-x-4">
-                  <Avatar className="w-16 h-16">
-                    <AvatarImage src="/api/placeholder/64/64" />
-                    <AvatarFallback className="bg-primary text-primary-foreground font-semibold text-lg">
-                      DR
-                    </AvatarFallback>
-                  </Avatar>
-
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between mb-1">
-                      <h3 className="font-semibold text-lg">Your Driver</h3>
-                      <Badge className="bg-primary text-primary-foreground">
-                        <Clock className="w-3 h-3 mr-1" />
-                        5 min
-                      </Badge>
-                    </div>
-
-                    <div className="flex items-center space-x-4 text-sm text-muted-foreground">
-                      <div className="flex items-center space-x-1">
-                        <Star className="w-4 h-4 fill-current text-primary" />
-                        <span>4.9</span>
-                      </div>
-                      <div className="flex items-center space-x-1">
-                        <Shield className="w-4 h-4" />
-                        <span>Verified</span>
-                      </div>
-                    </div>
-                  </div>
+          <Card className="card-taxi p-5 overflow-hidden animate-scale-in border-l-4 border-l-primary shadow-lg">
+            <div className="flex items-center space-x-4">
+              <div className="relative">
+                <Avatar className="w-16 h-16 border-2 border-primary/20 p-0.5">
+                  <AvatarImage src="/api/placeholder/64/64" />
+                  <AvatarFallback className="bg-primary text-primary-foreground font-bold text-xl">
+                    DR
+                  </AvatarFallback>
+                </Avatar>
+                <div className="absolute -bottom-1 -right-1 bg-green-500 w-5 h-5 rounded-full border-2 border-background flex items-center justify-center">
+                    <CheckCircle2 className="w-3 h-3 text-white" />
                 </div>
+              </div>
+
+              <div className="flex-1">
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="font-bold text-lg leading-none">Ashok Kumar</h3>
+                  <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 font-bold">
+                    <Star className="w-3 h-3 mr-1 fill-current" />
+                    4.9
+                  </Badge>
+                </div>
+                <p className="text-sm text-muted-foreground font-medium mb-3 flex items-center">
+                   <Shield className="w-3 h-3 mr-1 text-primary" />
+                   Premium Verified Partner
+                </p>
 
                 <div className="flex space-x-3">
-                  <Button variant="outline" className="flex-1 h-12 rounded-xl">
-                    <Phone className="w-5 h-5 mr-2" />
+                  <Button variant="outline" className="flex-1 h-11 rounded-xl bg-muted/30 border-none font-bold text-xs"
+                    onClick={() => window.open('tel:9876543210')}>
+                    <Phone className="w-4 h-4 mr-2" />
                     Call
                   </Button>
-                  <Button variant="outline" className="flex-1 h-12 rounded-xl">
-                    <MessageSquare className="w-5 h-5 mr-2" />
-                    Message
+                  <Button variant="outline" className="flex-1 h-11 rounded-xl bg-muted/30 border-none font-bold text-xs">
+                    <MessageSquare className="w-4 h-4 mr-2" />
+                    Chat
                   </Button>
                 </div>
               </div>
-            </Card>
-          </>
+            </div>
+          </Card>
         )}
 
-        {/* Trip Details */}
-        <Card className="card-taxi animate-fade-in">
-          <div className="space-y-4">
-            <h3 className="font-semibold">Trip Details</h3>
+        {/* Trip Summary */}
+        <Card className="card-taxi p-6 animate-fade-in shadow-xl">
+          <div className="space-y-6">
+            <h3 className="font-bold text-lg flex items-center border-b border-border/50 pb-3">
+               <Navigation className="w-5 h-5 mr-2 text-primary" />
+               Trip Summary
+            </h3>
 
-            <div className="space-y-3">
-              <div className="flex items-center space-x-3">
-                <div className="w-3 h-3 bg-primary rounded-full"></div>
+            <div className="space-y-5 relative">
+              <div className="absolute left-[7px] top-6 bottom-6 w-[2px] bg-gradient-to-b from-primary to-destructive/50"></div>
+              
+              <div className="flex items-start space-x-4">
+                <div className="w-4 h-4 bg-primary rounded-full mt-1.5 ring-4 ring-primary/20 shrink-0 z-10"></div>
                 <div>
-                  <p className="font-medium">{ride.pickup_address}</p>
-                  <p className="text-sm text-muted-foreground">Pickup location</p>
+                  <p className="text-[10px] text-muted-foreground uppercase font-black tracking-widest">Pickup</p>
+                  <p className="font-bold text-sm leading-tight mt-1">{ride.pickup_address}</p>
                 </div>
               </div>
 
-              <div className="flex items-center space-x-3">
-                <MapPin className="w-4 h-4 text-destructive" />
+              <div className="flex items-start space-x-4">
+                <MapPin className="w-4 h-4 text-destructive mt-1.5 shrink-0 z-10" />
                 <div>
-                  <p className="font-medium">{ride.dropoff_address}</p>
-                  <p className="text-sm text-muted-foreground">Drop location</p>
+                  <p className="text-[10px] text-muted-foreground uppercase font-black tracking-widest">Destination</p>
+                  <p className="font-bold text-sm leading-tight mt-1">{ride.dropoff_address}</p>
                 </div>
               </div>
             </div>
 
-            <div className="border-t pt-4 grid grid-cols-3 gap-4 text-center">
-              <div>
-                <p className="text-2xl font-bold text-primary">₹{ride.fare_amount}</p>
-                <p className="text-sm text-muted-foreground">Estimated fare</p>
+            <div className="pt-6 grid grid-cols-3 gap-2">
+              <div className="bg-muted/30 p-3 rounded-2xl">
+                <p className="text-xl font-black text-primary">₹{ride.fare_amount}</p>
+                <p className="text-[9px] text-muted-foreground uppercase font-bold">Total Fare</p>
               </div>
-              <div>
-                <p className="text-2xl font-bold">12.5</p>
-                <p className="text-sm text-muted-foreground">km</p>
+              <div className="bg-muted/30 p-3 rounded-2xl">
+                <p className="text-xl font-black">{liveStats.distance.toFixed(1)}</p>
+                <p className="text-[9px] text-muted-foreground uppercase font-bold">KM distance</p>
               </div>
-              <div>
-                <p className="text-2xl font-bold">25</p>
-                <p className="text-sm text-muted-foreground">min</p>
+              <div className="bg-muted/30 p-3 rounded-2xl">
+                <p className="text-xl font-black">{Math.round(liveStats.duration)}</p>
+                <p className="text-[9px] text-muted-foreground uppercase font-bold">est mins</p>
               </div>
             </div>
           </div>
         </Card>
 
-        {/* Action Button - Only show if unpaid and not requested */}
-        <div className="animate-scale-in">
+        {/* Checkout Link / Payment Status */}
+        <div className="animate-scale-in pt-4">
           {ride.status === "requested" ? (
             <Button
               variant="outline"
-              className="btn-taxi-outline w-full h-14 text-lg font-semibold"
+              className="btn-taxi-outline w-full h-15 text-lg font-bold border-2"
               onClick={() => navigate("/home")}
             >
-              Back to Home
+              Cancel Request
             </Button>
+          ) : ride.status === 'completed' ? (
+             !hasRated ? (
+                <RatingDialog 
+                    rideId={ride.id} 
+                    driverId={ride.driver_id} 
+                    onSuccess={() => setHasRated(true)} 
+                />
+             ) : (
+                <div className="bg-primary/10 p-6 rounded-3xl text-center border-2 border-primary/20">
+                    <CheckCircle2 className="w-12 h-12 text-primary mx-auto mb-3" />
+                    <h4 className="font-bold text-lg">Trip Feedback Recorded</h4>
+                    <p className="text-sm text-muted-foreground">Thank you for helping us maintain high standards.</p>
+                    <Button variant="outline" className="mt-4 w-full h-12 rounded-xl" onClick={() => navigate('/home')}>Return Home</Button>
+                </div>
+             )
           ) : ride.payment_status === 'paid' ? (
-            <Button
-              className="w-full h-14 text-lg font-semibold bg-green-500 hover:bg-green-600 text-white cursor-default"
-              onClick={() => { }}
-            >
-              <Shield className="w-5 h-5 mr-2" />
-              Ride Paid & Verified
-            </Button>
+            <div className="bg-green-500/10 border-2 border-green-500/20 p-5 rounded-3xl flex items-center justify-between shadow-lg shadow-green-500/5">
+                <div className="flex items-center space-x-3">
+                    <div className="bg-green-500 p-2 rounded-full">
+                        <CheckCircle2 className="w-6 h-6 text-white" />
+                    </div>
+                    <div>
+                        <p className="font-black text-green-700 uppercase text-xs tracking-widest leading-none">Paid & Secure</p>
+                        <p className="text-[10px] text-green-600 font-bold mt-1">Transaction Verified</p>
+                    </div>
+                </div>
+                <Button variant="ghost" className="text-green-700 font-black text-xs hover:bg-green-500/10" onClick={() => navigate('/trip-history')}>
+                    RECEIPT
+                </Button>
+            </div>
           ) : (
             <Button
               onClick={() => navigate("/payment")}
-              className="btn-taxi w-full h-14 text-lg font-semibold"
+              className="btn-taxi w-full h-15 text-lg font-black shadow-2xl shadow-primary/30 group"
             >
-              Pay Now
+              Finish & Pay Now
+              <CreditCard className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </Button>
           )}
         </div>
@@ -326,5 +445,5 @@ const RideDetails = () => {
     </div>
   );
 };
-
+import { RatingDialog } from "@/components/RatingDialog";
 export default RideDetails;

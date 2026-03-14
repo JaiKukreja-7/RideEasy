@@ -32,16 +32,66 @@ const BookRide = () => {
     destinationCoords?: { lat: number; lng: number };
   } || {};
 
+  const [distance, setDistance] = useState<number>(0);
+  const [duration, setDuration] = useState<number>(0);
+  const [subscription, setSubscription] = useState<any>(null);
+
   const pickupAddress = state.pickup || "Main Street, Downtown";
   const dropoffAddress = state.destination || "Airport Terminal 1";
 
-  // ... carTypes definition ...
+  // Fetch subscription
+  useEffect(() => {
+    if (user) {
+        supabase
+            .from('subscriptions')
+            .select('*')
+            .eq('user_id', user.id)
+            .eq('status', 'active')
+            .single()
+            .then(({ data }) => setSubscription(data));
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (state.pickupCoords && state.destinationCoords) {
+      calculateRoute();
+    }
+  }, [state.pickupCoords, state.destinationCoords]);
+
+  const calculateRoute = async () => {
+    try {
+      const { pickupCoords, destinationCoords } = state;
+      const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${pickupCoords?.lng},${pickupCoords?.lat};${destinationCoords?.lng},${destinationCoords?.lat}?overview=false`);
+      const data = await res.json();
+      if (data.routes && data.routes[0]) {
+        setDistance(data.routes[0].distance / 1000); // meters to km
+        setDuration(data.routes[0].duration / 60); // seconds to mins
+      }
+    } catch (e) {
+      console.error(e);
+      setDistance(12.5); // Fallback
+    }
+  };
+
+  const getDiscountFactor = () => {
+    if (!subscription) return 1;
+    switch (subscription.plan_type) {
+      case 'silver': return 0.9; // 10% off
+      case 'gold': return 0.8;   // 20% off
+      case 'platinum': return 0.75; // 25% off
+      default: return 1;
+    }
+  };
+
+  const discountFactor = getDiscountFactor();
+
   const carTypes = [
     {
       id: "mini",
       name: "RideEasy Mini",
       description: "Affordable rides for 1-2 people",
-      price: 150,
+      price: Math.round((distance * 15 + 30) * discountFactor),
+      originalPrice: Math.round(distance * 15 + 30),
       eta: "3 min",
       capacity: 2,
       icon: Car,
@@ -51,7 +101,8 @@ const BookRide = () => {
       id: "sedan",
       name: "RideEasy Sedan",
       description: "Comfortable rides for 3-4 people",
-      price: 220,
+      price: Math.round((distance * 22 + 50) * discountFactor),
+      originalPrice: Math.round(distance * 22 + 50),
       eta: "5 min",
       capacity: 4,
       icon: Car,
@@ -61,7 +112,8 @@ const BookRide = () => {
       id: "suv",
       name: "RideEasy SUV",
       description: "Spacious rides for groups",
-      price: 350,
+      price: Math.round((distance * 35 + 80) * discountFactor),
+      originalPrice: Math.round(distance * 35 + 80),
       eta: "7 min",
       capacity: 6,
       icon: Truck,
@@ -86,6 +138,10 @@ const BookRide = () => {
           customer_id: user.id,
           pickup_address: pickupAddress,
           dropoff_address: dropoffAddress,
+          pickup_lat: state.pickupCoords?.lat,
+          pickup_lng: state.pickupCoords?.lng,
+          dropoff_lat: state.destinationCoords?.lat,
+          dropoff_lng: state.destinationCoords?.lng,
           fare_amount: selectedCarDetails?.price || 0,
           status: "requested"
         })
@@ -144,7 +200,7 @@ const BookRide = () => {
               <span className="font-medium">Drop: {dropoffAddress}</span>
             </div>
             <div className="text-sm text-muted-foreground pt-2 border-t">
-              Distance: 12.5 km • Estimated time: 25 min
+              Distance: {distance.toFixed(1)} km • Estimated time: {Math.round(duration)} min
             </div>
           </div>
         </Card>
@@ -176,8 +232,18 @@ const BookRide = () => {
                   <div className="flex items-center justify-between mb-1">
                     <h4 className="font-semibold">{car.name}</h4>
                     <div className="text-right">
-                      <p className="font-bold text-lg">₹{car.price}</p>
+                      <div className="flex items-center justify-end space-x-2">
+                        {discountFactor < 1 && (
+                          <span className="text-sm text-muted-foreground line-through">₹{car.originalPrice}</span>
+                        )}
+                        <p className="font-bold text-lg text-primary">₹{car.price}</p>
+                      </div>
                       <p className="text-sm text-muted-foreground">{car.eta} away</p>
+                      {discountFactor < 1 && subscription && (
+                        <Badge variant="outline" className="text-[9px] bg-primary/5 text-primary border-primary/20 uppercase font-bold mt-1">
+                          {subscription.plan_type} SAVINGS
+                        </Badge>
+                      )}
                     </div>
                   </div>
 

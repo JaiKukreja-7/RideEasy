@@ -38,24 +38,45 @@ function LocationPicker({ onPick }: { onPick: (lat: number, lng: number) => void
     return null;
 }
 
+interface DriverLocation {
+    id: string;
+    lat: number;
+    lng: number;
+    angle?: number;
+}
+
 interface LeafletMapProps {
     height?: string;
     onLocationSelect?: (address: string, lat?: number, lng?: number) => void;
     selectingMode?: "pickup" | "destination" | null;
     drivers?: DriverLocation[];
     route?: [number, number][]; // Array of LatLng tuples
+    center?: [number, number];
 }
 
-const LeafletMap = ({ height = "200px", onLocationSelect, selectingMode, drivers = [], route }: LeafletMapProps) => {
+const taxiIcon = L.divIcon({
+    html: `<div class="taxi-marker" style="font-size: 24px;">🚕</div>`,
+    className: 'custom-taxi-icon',
+    iconSize: [30, 30],
+});
+
+const LeafletMap = ({ height = "200px", onLocationSelect, selectingMode, drivers = [], route, center }: LeafletMapProps) => {
     // Default: Mumbai [19.0760, 72.8777]
-    const [position, setPosition] = useState<[number, number]>([19.0760, 72.8777]);
+    const [position, setPosition] = useState<[number, number]>(center || [19.0760, 72.8777]);
     const [myLocation, setMyLocation] = useState<[number, number] | null>(null);
     const [loading, setLoading] = useState(false);
 
     // Initial Geolocation
     useEffect(() => {
-        handleLocateMe();
+        if (!center) handleLocateMe();
     }, []);
+
+    // Sync position with center prop
+    useEffect(() => {
+        if (center) {
+            setPosition(center);
+        }
+    }, [center]);
 
     const handleLocateMe = () => {
         setLoading(true);
@@ -158,6 +179,17 @@ const LeafletMap = ({ height = "200px", onLocationSelect, selectingMode, drivers
                         <Popup>You are here</Popup>
                     </Marker>
                 )}
+
+                {/* Render Drivers */}
+                {drivers.map((driver) => (
+                    <Marker 
+                        key={driver.id} 
+                        position={[driver.lat, driver.lng]} 
+                        icon={taxiIcon}
+                    >
+                        <Popup>Taxi ID: {driver.id.slice(0, 5)}</Popup>
+                    </Marker>
+                ))}
 
                 {/* Render Route Polyline */}
                 {route && route.length > 0 && (
