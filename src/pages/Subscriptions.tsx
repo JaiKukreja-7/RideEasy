@@ -10,7 +10,7 @@ import { toast } from "sonner";
 
 const Subscriptions = () => {
     const navigate = useNavigate();
-    const { user } = useAuth();
+    const { user, role } = useAuth();
     const [loading, setLoading] = useState(false);
     const [currentPlan, setCurrentPlan] = useState<any>(null);
 
@@ -63,7 +63,7 @@ const Subscriptions = () => {
     }, [user]);
 
     const fetchSubscription = async () => {
-        const { data, error } = await supabase
+        const { data } = await supabase
             .from('subscriptions')
             .select('*')
             .eq('user_id', user?.id)
@@ -72,6 +72,25 @@ const Subscriptions = () => {
         
         if (data) setCurrentPlan(data);
     };
+
+    if (user && role === 'driver') {
+        return (
+            <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 text-center">
+                <Card className="p-8 max-w-sm rounded-[40px] space-y-6 shadow-2xl border-none">
+                    <div className="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center mx-auto">
+                        <Shield className="w-10 h-10 text-indigo-600" />
+                    </div>
+                    <div>
+                        <h2 className="text-2xl font-black text-slate-800 tracking-tight">Driver Account</h2>
+                        <p className="text-sm text-slate-500 mt-2 font-medium">As a driver, your passes are managed in the Driver Dashboard.</p>
+                    </div>
+                    <Button onClick={() => navigate("/driver-dashboard")} className="w-full h-14 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl shadow-xl shadow-indigo-100 uppercase tracking-widest text-xs">
+                        Go to Dashboard
+                    </Button>
+                </Card>
+            </div>
+        );
+    }
 
     const handleSubscribe = async (planId: string) => {
         if (!user) {

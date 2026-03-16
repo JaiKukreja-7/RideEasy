@@ -40,15 +40,20 @@ const Home = () => {
 
   const [pickupCoords, setPickupCoords] = useState<{ lat: number, lng: number } | null>(null);
   const [destinationCoords, setDestinationCoords] = useState<{ lat: number, lng: number } | null>(null);
+  const [userFavorites, setUserFavorites] = useState<any[]>([]);
 
   const navigate = useNavigate();
   const { user, role, signOut, loading } = useAuth();
 
   useEffect(() => {
-    if (!loading && !user) {
-      navigate("/");
-    } else if (!loading && role === 'driver') {
-      navigate("/driver-dashboard");
+    if (!loading) {
+      if (!user) {
+        navigate("/");
+      } else if (role === 'driver') {
+        navigate("/driver-dashboard");
+      } else {
+        fetchFavorites();
+      }
     }
   }, [user, role, loading, navigate]);
 
@@ -111,8 +116,16 @@ const Home = () => {
     };
   }, []);
 
+  const fetchFavorites = async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from('user_favorites')
+      .select('*')
+      .eq('user_id', user.id);
+    if (data) setUserFavorites(data);
+  };
   const fetchOnlineDrivers = async () => {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('driver_locations')
       .select('*')
       .eq('is_online', true)
@@ -197,11 +210,46 @@ const Home = () => {
     });
   };
 
+  const handleQuickAction = async (label: string) => {
+    const fav = userFavorites.find(f => f.label === label);
+    
+    if (fav) {
+      setDestination(fav.address);
+      setDestinationCoords({ lat: Number(fav.lat), lng: Number(fav.lng) });
+      toast.success(`${label} location selected`);
+    } else {
+      // If no fav is set, offer to save current destination as fav
+      if (destination && destinationCoords) {
+        try {
+          const { error } = await supabase
+            .from('user_favorites')
+            .upsert({
+              user_id: user?.id,
+              label,
+              address: destination,
+              lat: destinationCoords.lat,
+              lng: destinationCoords.lng,
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'user_id,label' });
+
+          if (error) throw error;
+          toast.success(`${label} location saved!`);
+          fetchFavorites();
+        } catch (err: any) {
+          toast.error("Failed to save favorite");
+        }
+      } else {
+        toast.info(`Search for a destination first to save it as ${label}`);
+        setActiveInput("destination");
+      }
+    }
+  };
+
   const quickActions = [
-    { icon: HomeIcon, label: "Home", address: "Saved", onClick: () => handleSearchInput("Home", "destination") },
-    { icon: Briefcase, label: "Work", address: "Saved", onClick: () => handleSearchInput("Work", "destination") },
-    { icon: Clock, label: "History", address: "Recent", onClick: () => navigate("/trip-history") },
-    { icon: Heart, label: "Loved", address: "Favs", onClick: () => {} }
+    { icon: HomeIcon, label: "Home", color: "text-blue-500", onClick: () => handleQuickAction("Home") },
+    { icon: Briefcase, label: "Work", color: "text-orange-500", onClick: () => handleQuickAction("Work") },
+    { icon: Clock, label: "History", color: "text-slate-500", onClick: () => navigate("/trip-history") },
+    { icon: Heart, label: "Loved", color: "text-red-500", onClick: () => handleQuickAction("Loved") }
   ];
 
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
@@ -405,12 +453,14 @@ const Home = () => {
                 onClick={action.onClick}
               >
                 <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center">
-                    <action.icon className="w-5 h-5 text-primary" />
+                  <div className={`w-10 h-10 ${action.color?.replace('text', 'bg')}/10 rounded-xl flex items-center justify-center`}>
+                    <action.icon className={`w-5 h-5 ${action.color}`} />
                   </div>
                   <div className="flex-1 overflow-hidden">
                     <p className="font-bold text-xs truncate">{action.label}</p>
-                    <p className="text-[10px] text-muted-foreground truncate uppercase font-black tracking-widest">{action.address}</p>
+                    <p className="text-[10px] text-muted-foreground truncate uppercase font-black tracking-widest leading-none mt-1">
+                      {userFavorites.find(f => f.label === action.label)?.address.split(',')[0] || (action.label === 'History' ? 'Recent' : 'Not Set')}
+                    </p>
                   </div>
                 </div>
               </Card>

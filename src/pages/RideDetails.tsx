@@ -45,6 +45,7 @@ interface Ride {
 interface DriverInfo {
     full_name: string;
     vehicle_number: string;
+    avatar_url?: string;
 }
 
 const RideDetails = () => {
@@ -223,7 +224,7 @@ const RideDetails = () => {
   };
 
   const fetchDriverInfo = async (driverId: string) => {
-      const { data } = await supabase.from('profiles').select('full_name, vehicle_number').eq('id', driverId).single();
+      const { data } = await supabase.from('profiles').select('full_name, vehicle_number, avatar_url').eq('id', driverId).single();
       if (data) {
           setDriverInfo(data as DriverInfo);
       }
@@ -323,6 +324,7 @@ const RideDetails = () => {
           </Card>
         )}
 
+
         {/* Ride Status Card (Only if requested) */}
         {ride.status === "requested" && (
           <Card className="card-taxi p-8 animate-fade-in text-center relative overflow-hidden">
@@ -345,6 +347,27 @@ const RideDetails = () => {
             </div>
           </Card>
         )}
+
+
+        {/* Cancelled View */}
+        {ride.status === "cancelled" && (
+          <Card className="card-taxi p-8 animate-in fade-in zoom-in-95 duration-500 text-center border-2 border-destructive/20 bg-destructive/5">
+            <div className="w-20 h-20 bg-destructive/10 rounded-full flex items-center justify-center mx-auto mb-6">
+              <Shield className="w-10 h-10 text-destructive" />
+            </div>
+            <h3 className="text-2xl font-black text-slate-800 mb-2">Trip Cancelled</h3>
+            <p className="text-muted-foreground font-medium mb-8">
+              This trip has been cancelled. If this was unexpected, you can request a new ride from the home screen.
+            </p>
+            <Button 
+              className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-2xl shadow-xl"
+              onClick={() => navigate("/home")}
+            >
+              RETURN TO HOME
+            </Button>
+          </Card>
+        )}
+
 
         {/* OTP Security Code */}
         {ride.status === "accepted" || ride.status === "arrived" ? (

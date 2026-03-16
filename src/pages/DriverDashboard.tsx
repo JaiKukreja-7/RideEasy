@@ -9,6 +9,15 @@ import { Progress } from "@/components/ui/progress";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { 
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogFooter,
+} from "@/components/ui/dialog";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Input } from "@/components/ui/input";
+import { 
     MapPin, 
     Navigation, 
     User, 
@@ -30,7 +39,10 @@ import {
     ArrowDownLeft,
     ShieldCheck,
     Loader2,
-    MessageCircle
+    MessageCircle,
+    Smartphone,
+    Camera,
+    Image as ImageIcon
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -111,16 +123,30 @@ const DriverDashboard = () => {
     const [driverRating, setDriverRating] = useState(0);
     const [activeSubscription, setActiveSubscription] = useState<any>(null);
     const [isCheckingSub, setIsCheckingSub] = useState(true);
-    const [profile, setProfile] = useState({ full_name: '', vehicle_number: '' });
+    const [profile, setProfile] = useState({ 
+        full_name: '', 
+        vehicle_number: '', 
+        daily_goal: 3000,
+        upi_id: '',
+        bank_name: '',
+        bank_account_number: '',
+        bank_ifsc_code: '',
+        avatar_url: ''
+    });
     const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+    const [isEditingGoal, setIsEditingGoal] = useState(false);
+    const [newGoal, setNewGoal] = useState('');
     const [otpInput, setOtpInput] = useState('');
     const [showChat, setShowChat] = useState(false);
-    const [customerInfo, setCustomerInfo] = useState<{full_name: string} | null>(null);
+    const [customerInfo, setCustomerInfo] = useState<{full_name: string, avatar_url?: string} | null>(null);
+    const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
+    const [withdrawAmount, setWithdrawAmount] = useState('');
+    const [payoutMethod, setPayoutMethod] = useState<'upi' | 'bank'>('upi');
+    const [isProcessingWithdraw, setIsProcessingWithdraw] = useState(false);
     
     // Mock Driver Performance
     const onlineTime = "5h 24m";
-    const dailyGoal = 3000;
-    const goalProgress = useMemo(() => Math.min((dailyEarnings / dailyGoal) * 100, 100), [dailyEarnings]);
+    const goalProgress = useMemo(() => Math.min((dailyEarnings / profile.daily_goal) * 100, 100), [dailyEarnings, profile.daily_goal]);
 
     const navigate = useNavigate();
 
@@ -183,6 +209,8 @@ const DriverDashboard = () => {
                 .eq('user_id', user.id)
                 .eq('status', 'active')
                 .gt('end_date', new Date().toISOString())
+                .order('created_at', { ascending: false })
+                .limit(1)
                 .maybeSingle();
             
             setActiveSubscription(sub);
@@ -191,14 +219,20 @@ const DriverDashboard = () => {
             // 2. Fetch Profile
             const { data: prof } = await supabase
                 .from('profiles')
-                .select('full_name, vehicle_number')
+                .select('full_name, vehicle_number, daily_goal, upi_id, bank_name, bank_account_number, bank_ifsc_code, avatar_url')
                 .eq('id', user.id)
                 .single();
             
             if (prof) {
                 setProfile({
                     full_name: prof.full_name || '',
-                    vehicle_number: prof.vehicle_number || ''
+                    vehicle_number: prof.vehicle_number || '',
+                    daily_goal: prof.daily_goal || 3000,
+                    upi_id: prof.upi_id || '',
+                    bank_name: prof.bank_name || '',
+                    bank_account_number: prof.bank_account_number || '',
+                    bank_ifsc_code: prof.bank_ifsc_code || '',
+                    avatar_url: prof.avatar_url || ''
                 });
             }
 
@@ -225,7 +259,13 @@ const DriverDashboard = () => {
                 .from('profiles')
                 .update({
                     full_name: profile.full_name,
-                    vehicle_number: profile.vehicle_number
+                    vehicle_number: profile.vehicle_number,
+                    daily_goal: profile.daily_goal,
+                    upi_id: profile.upi_id,
+                    bank_name: profile.bank_name,
+                    bank_account_number: profile.bank_account_number,
+                    bank_ifsc_code: profile.bank_ifsc_code,
+                    avatar_url: profile.avatar_url
                 })
                 .eq('id', user.id);
 
@@ -235,6 +275,29 @@ const DriverDashboard = () => {
             toast.error(err.message || "Failed to update profile");
         } finally {
             setIsUpdatingProfile(false);
+        }
+    };
+
+    const handleUpdateGoal = async () => {
+        if (!user) return;
+        const goalValue = parseInt(newGoal);
+        if (isNaN(goalValue) || goalValue <= 0) {
+            toast.error("Please enter a valid goal amount");
+            return;
+        }
+
+        try {
+            const { error } = await supabase
+                .from('profiles')
+                .update({ daily_goal: goalValue })
+                .eq('id', user.id);
+
+            if (error) throw error;
+            setProfile(prev => ({ ...prev, daily_goal: goalValue }));
+            setIsEditingGoal(false);
+            toast.success("Daily goal updated!");
+        } catch (err: any) {
+            toast.error(err.message || "Failed to update goal");
         }
     };
 
@@ -283,6 +346,8 @@ const DriverDashboard = () => {
                 .eq('user_id', user.id)
                 .eq('status', 'active')
                 .gt('end_date', new Date().toISOString())
+                .order('created_at', { ascending: false })
+                .limit(1)
                 .maybeSingle();
             setActiveSubscription(data);
         } catch (err) {
@@ -365,11 +430,74 @@ const DriverDashboard = () => {
 
         const currentActive = rides.find(r => ['accepted', 'arrived', 'in_progress'].includes(r.status));
         if (currentActive && currentActive.customer_id) {
-            const { data: cust } = await supabase.from('profiles').select('full_name').eq('id', currentActive.customer_id).single();
+            const { data: cust } = await supabase.from('profiles').select('full_name, avatar_url').eq('id', currentActive.customer_id).single();
             if (cust) setCustomerInfo(cust);
         } else {
             setCustomerInfo(null);
             setShowChat(false);
+        }
+    };
+
+    const handleWithdraw = async () => {
+        if (!user) return;
+        const amount = parseFloat(withdrawAmount);
+        
+        if (isNaN(amount) || amount <= 0) {
+            toast.error("Please enter a valid amount");
+            return;
+        }
+
+        if (amount > totalRevenue) {
+            toast.error("Insufficient balance");
+            return;
+        }
+
+        // Validate payout details based on method
+        if (payoutMethod === 'upi' && !profile.upi_id) {
+            toast.error("Please enter your UPI ID in Profile settings");
+            setActiveTab('profile');
+            setIsWithdrawModalOpen(false);
+            return;
+        }
+
+        if (payoutMethod === 'bank' && (!profile.bank_account_number || !profile.bank_ifsc_code)) {
+            toast.error("Please enter your Bank Details in Profile settings");
+            setActiveTab('profile');
+            setIsWithdrawModalOpen(false);
+            return;
+        }
+
+        setIsProcessingWithdraw(true);
+        try {
+            const details = payoutMethod === 'upi' 
+                ? { upi_id: profile.upi_id }
+                : { 
+                    bank_name: profile.bank_name, 
+                    account_number: profile.bank_account_number, 
+                    ifsc: profile.bank_ifsc_code 
+                  };
+
+            const { error } = await supabase
+                .from('payouts')
+                .insert({
+                    driver_id: user.id,
+                    amount,
+                    method: payoutMethod,
+                    details,
+                    status: 'pending'
+                });
+
+            if (error) throw error;
+
+            toast.success("Withdrawal request submitted!", {
+                description: `₹${amount} will be credited to your ${payoutMethod.toUpperCase()} shortly.`
+            });
+            setIsWithdrawModalOpen(false);
+            setWithdrawAmount('');
+        } catch (err: any) {
+            toast.error(err.message || "Withdrawal failed");
+        } finally {
+            setIsProcessingWithdraw(false);
         }
     };
 
@@ -410,8 +538,12 @@ const DriverDashboard = () => {
             {/* Premium Header */}
             <div className="bg-white px-6 py-4 flex items-center justify-between shadow-sm sticky top-0 z-50">
                 <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
-                        <User className="w-5 h-5 font-black" />
+                    <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center text-primary overflow-hidden">
+                        {profile.avatar_url ? (
+                            <img src={profile.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                        ) : (
+                            <User className="w-5 h-5 font-black" />
+                        )}
                     </div>
                     <div>
                         <h1 className="font-black text-lg tracking-tight uppercase truncate max-w-[120px]">
@@ -552,9 +684,24 @@ const DriverDashboard = () => {
                                         </Button>
                                     )}
                                 </div>
+
+                                {(activeRide.status === 'accepted' || activeRide.status === 'arrived') && (
+                                    <Button 
+                                        variant="ghost" 
+                                        className="w-full h-12 text-destructive hover:bg-destructive/10 hover:text-destructive font-black rounded-2xl uppercase tracking-widest text-[10px] mt-2"
+                                        onClick={() => {
+                                            if (window.confirm("Are you sure you want to cancel this ride? This will notify the customer.")) {
+                                                handleUpdateRideStatus(activeRide.id, 'cancelled');
+                                            }
+                                        }}
+                                    >
+                                        Cancel Ride
+                                    </Button>
+                                )}
                             </div>
                         </div>
                     </Card>
+
                 )}
 
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -670,10 +817,44 @@ const DriverDashboard = () => {
                                 <div className="space-y-4">
                                     <div className="flex justify-between items-end">
                                         <span className="text-sm font-black text-indigo-600">₹{dailyEarnings}</span>
-                                        <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-tight">Daily Target: ₹{dailyGoal}</span>
+                                        <div className="text-right">
+                                            {isEditingGoal ? (
+                                                <div className="flex items-center space-x-2">
+                                                    <input 
+                                                        type="number" 
+                                                        value={newGoal}
+                                                        onChange={(e) => setNewGoal(e.target.value)}
+                                                        className="w-20 h-8 border rounded px-2 text-xs font-bold font-mono"
+                                                        placeholder="Goal"
+                                                        autoFocus
+                                                    />
+                                                    <Button size="icon" className="h-6 w-6 rounded-full" onClick={handleUpdateGoal}>
+                                                        <ShieldCheck className="w-3 h-3" />
+                                                    </Button>
+                                                    <Button size="icon" variant="ghost" className="h-6 w-6 rounded-full" onClick={() => setIsEditingGoal(false)}>
+                                                        <LogOut className="w-3 h-3 rotate-180" />
+                                                    </Button>
+                                                </div>
+                                            ) : (
+                                                <div className="group flex items-center space-x-2 cursor-pointer" onClick={() => {
+                                                    setNewGoal(profile.daily_goal.toString());
+                                                    setIsEditingGoal(true);
+                                                }}>
+                                                    <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-tight">Daily Target: ₹{profile.daily_goal}</span>
+                                                    <Badge variant="outline" className="p-0 border-none opacity-0 group-hover:opacity-100 transition-opacity">
+                                                        <TrendingUp className="w-3 h-3 text-indigo-500" />
+                                                    </Badge>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                     <Progress value={goalProgress} className="h-4 bg-indigo-50 rounded-full" />
-                                    <p className="text-[10px] font-bold text-slate-400 text-center uppercase tracking-widest">₹{dailyGoal - dailyEarnings} more for target!</p>
+                                    <p className="text-[10px] font-bold text-slate-400 text-center uppercase tracking-widest transition-all">
+                                        {dailyEarnings >= profile.daily_goal 
+                                            ? <span className="text-green-600">+₹{dailyEarnings - profile.daily_goal} more than goal! 🚀</span>
+                                            : `₹${profile.daily_goal - dailyEarnings} more for target!`
+                                        }
+                                    </p>
                                 </div>
                             </Card>
 
@@ -766,7 +947,16 @@ const DriverDashboard = () => {
                                 </div>
                                 <h2 className="text-5xl font-black tracking-tighter">₹{totalRevenue}</h2>
                                 <div className="pt-4 flex gap-3">
-                                    <Button className="flex-1 bg-white text-indigo-600 hover:bg-slate-50 font-black h-14 rounded-2xl shadow-xl">
+                                    <Button 
+                                        className="flex-1 bg-white text-indigo-600 hover:bg-slate-50 font-black h-14 rounded-2xl shadow-xl"
+                                        onClick={() => {
+                                            if (totalRevenue <= 0) {
+                                                toast.error("You have no earnings to withdraw");
+                                                return;
+                                            }
+                                            setIsWithdrawModalOpen(true);
+                                        }}
+                                    >
                                         WITHDRAW
                                     </Button>
                                     <Button variant="outline" className="w-14 h-14 bg-white/10 border-white/20 text-white rounded-2xl hover:bg-white/20">
@@ -836,7 +1026,7 @@ const DriverDashboard = () => {
                                         <Button 
                                             onClick={() => handlePurchasePass(plan.name, plan.days, plan.price)}
                                             disabled={activeSubscription?.plan_name === plan.name}
-                                            className={`w-full mt-6 h-14 font-black rounded-2xl ${plan.popular ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-slate-900 hover:bg-slate-800'}`}
+                                            className={`w-full mt-6 h-14 font-black rounded-2xl text-white ${plan.popular ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-slate-900 hover:bg-slate-800'}`}
                                         >
                                             {activeSubscription?.plan_name === plan.name ? 'CURRENT PLAN' : 'ACTIVATE NOW'}
                                         </Button>
@@ -865,6 +1055,32 @@ const DriverDashboard = () => {
                             
                             <Card className="p-8 border-none shadow-xl bg-white rounded-[40px] space-y-6">
                                 <div className="space-y-4">
+                                    {/* Profile Picture Upload Section */}
+                                    <div className="flex flex-col items-center justify-center py-6 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200 mb-4 transition-all hover:bg-slate-100 group">
+                                        <div className="relative w-24 h-24 rounded-[32px] overflow-hidden shadow-xl mb-3 ring-4 ring-white group-hover:scale-105 transition-transform">
+                                            {profile.avatar_url ? (
+                                                <img src={profile.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                                            ) : (
+                                                <div className="w-full h-full bg-indigo-100 flex items-center justify-center text-indigo-400">
+                                                    <User className="w-10 h-10" />
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="space-y-2 w-full px-6">
+                                            <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400 text-center block">Profile Picture URL</Label>
+                                            <div className="relative">
+                                                <input 
+                                                    type="text" 
+                                                    value={profile.avatar_url}
+                                                    onChange={(e) => setProfile({ ...profile, avatar_url: e.target.value })}
+                                                    placeholder="Paste image link here"
+                                                    className="w-full h-12 bg-white border-none rounded-xl px-4 text-xs font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                                                />
+                                                <Camera className="absolute right-4 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-300" />
+                                            </div>
+                                        </div>
+                                    </div>
+
                                     <div className="space-y-2">
                                         <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Full Name</Label>
                                         <div className="relative">
@@ -892,14 +1108,70 @@ const DriverDashboard = () => {
                                             <Navigation2 className="absolute right-6 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-300" />
                                         </div>
                                     </div>
+
+                                    {/* Payout Details Section */}
+                                    <div className="pt-4 border-t border-slate-50">
+                                        <h4 className="font-black text-[10px] uppercase tracking-[0.2em] text-slate-400 mb-4">Payout Settings</h4>
+                                        
+                                        <div className="space-y-4">
+                                            <div className="space-y-2">
+                                                <Label className="text-[10px] font-black uppercase tracking-widest text-indigo-400 ml-1">UPI ID (Most Recommended)</Label>
+                                                <div className="relative">
+                                                    <input 
+                                                        type="text" 
+                                                        value={profile.upi_id}
+                                                        onChange={(e) => setProfile({ ...profile, upi_id: e.target.value })}
+                                                        placeholder="username@bank"
+                                                        className="w-full h-14 bg-indigo-50/50 border-none rounded-2xl px-6 font-bold focus:ring-2 focus:ring-indigo-100 outline-none transition-all"
+                                                    />
+                                                    <Zap className="absolute right-6 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-300" />
+                                                </div>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="space-y-2">
+                                                    <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Bank Name</Label>
+                                                    <input 
+                                                        type="text" 
+                                                        value={profile.bank_name}
+                                                        onChange={(e) => setProfile({ ...profile, bank_name: e.target.value })}
+                                                        placeholder="HDFC Bank"
+                                                        className="w-full h-14 bg-slate-50 border-none rounded-2xl px-6 font-bold text-xs focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                                                    />
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">IFSC Code</Label>
+                                                    <input 
+                                                        type="text" 
+                                                        value={profile.bank_ifsc_code}
+                                                        style={{ textTransform: 'uppercase' }}
+                                                        onChange={(e) => setProfile({ ...profile, bank_ifsc_code: e.target.value.toUpperCase() })}
+                                                        placeholder="HDFC0001234"
+                                                        className="w-full h-14 bg-slate-50 border-none rounded-2xl px-6 font-bold text-xs focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <div className="space-y-2">
+                                                <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Bank Account Number</Label>
+                                                <input 
+                                                    type="text" 
+                                                    value={profile.bank_account_number}
+                                                    onChange={(e) => setProfile({ ...profile, bank_account_number: e.target.value })}
+                                                    placeholder="Enter your account number"
+                                                    className="w-full h-14 bg-slate-50 border-none rounded-2xl px-6 font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
 
                                 <Button 
                                     onClick={handleUpdateProfile}
                                     disabled={isUpdatingProfile}
-                                    className="w-full h-14 bg-slate-900 hover:bg-slate-800 font-black rounded-2xl shadow-lg transition-all active:scale-95"
+                                    className="w-full h-14 bg-slate-900 hover:bg-slate-800 font-black rounded-2xl shadow-lg transition-all active:scale-95 text-white"
                                 >
-                                    {isUpdatingProfile ? <Loader2 className="animate-spin" /> : "SAVE CHANGES"}
+                                    {isUpdatingProfile ? <Loader2 className="animate-spin text-white" /> : "SAVE CHANGES"}
                                 </Button>
                             </Card>
 
@@ -1000,9 +1272,96 @@ const DriverDashboard = () => {
                 <ChatInterface 
                     rideId={activeRide.id} 
                     receiverName={customerInfo?.full_name || "Customer"} 
+                    receiverAvatar={customerInfo?.avatar_url}
                     onClose={() => setShowChat(false)} 
                 />
             )}
+
+            {/* WITHDRAW MODAL */}
+            <Dialog open={isWithdrawModalOpen} onOpenChange={setIsWithdrawModalOpen}>
+                <DialogContent className="sm:max-w-md rounded-[40px] border-none p-8 gap-6">
+                    <DialogHeader>
+                        <DialogTitle className="text-2xl font-black text-slate-800 flex items-center gap-3">
+                            <Wallet className="w-6 h-6 text-indigo-600" />
+                            Withdraw Funds
+                        </DialogTitle>
+                    </DialogHeader>
+
+                    <div className="space-y-6">
+                        <div className="bg-slate-50 p-6 rounded-[32px] border border-slate-100 flex items-center justify-between">
+                            <div>
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Available Balance</p>
+                                <p className="text-2xl font-black text-slate-800">₹{totalRevenue}</p>
+                            </div>
+                            <Badge className="bg-green-500 text-white font-black">WITHDRAWABLE</Badge>
+                        </div>
+
+                        <div className="space-y-3">
+                            <Label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Enter Amount</Label>
+                            <div className="relative">
+                                <span className="absolute left-6 top-1/2 -translate-y-1/2 text-2xl font-black text-slate-400">₹</span>
+                                <input 
+                                    type="number"
+                                    value={withdrawAmount}
+                                    onChange={(e) => setWithdrawAmount(e.target.value)}
+                                    placeholder="0"
+                                    className="w-full h-16 bg-white border-2 border-slate-100 rounded-3xl pl-12 pr-6 font-black text-2xl focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 outline-none transition-all shadow-sm"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="space-y-3">
+                            <Label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Transfer Method</Label>
+                            <RadioGroup value={payoutMethod} onValueChange={(v: any) => setPayoutMethod(v)} className="grid grid-cols-2 gap-3">
+                                <label className={`flex flex-col items-center justify-center p-4 rounded-[28px] border-2 transition-all cursor-pointer ${payoutMethod === 'upi' ? 'border-indigo-600 bg-indigo-50/50' : 'border-slate-100 bg-white hover:bg-slate-50'}`}>
+                                    <RadioGroupItem value="upi" className="sr-only" />
+                                    <Zap className={`w-5 h-5 mb-2 ${payoutMethod === 'upi' ? 'text-indigo-600' : 'text-slate-400'}`} />
+                                    <span className={`text-[10px] font-black uppercase tracking-widest ${payoutMethod === 'upi' ? 'text-indigo-600' : 'text-slate-400'}`}>UPI Transfer</span>
+                                </label>
+                                <label className={`flex flex-col items-center justify-center p-4 rounded-[28px] border-2 transition-all cursor-pointer ${payoutMethod === 'bank' ? 'border-indigo-600 bg-indigo-50/50' : 'border-slate-100 bg-white hover:bg-slate-50'}`}>
+                                    <RadioGroupItem value="bank" className="sr-only" />
+                                    <CheckCircle className={`w-5 h-5 mb-2 ${payoutMethod === 'bank' ? 'text-indigo-600' : 'text-slate-400'}`} />
+                                    <span className={`text-[10px] font-black uppercase tracking-widest ${payoutMethod === 'bank' ? 'text-indigo-600' : 'text-slate-400'}`}>Bank Transfer</span>
+                                </label>
+                            </RadioGroup>
+                        </div>
+
+                        {payoutMethod === 'upi' ? (
+                            <div className="flex items-center space-x-3 p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100">
+                                <div className="p-2 bg-white rounded-xl shadow-sm">
+                                    <Smartphone className="w-4 h-4 text-indigo-600" />
+                                </div>
+                                <div>
+                                    <p className="text-[10px] font-black text-slate-400 uppercase leading-none mb-1">UPI ID</p>
+                                    <p className="text-xs font-black text-indigo-900">{profile.upi_id || "NOT SET - GO TO PROFILE"}</p>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="flex items-center space-x-3 p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100">
+                                <div className="p-2 bg-white rounded-xl shadow-sm">
+                                    <CheckCircle className="w-4 h-4 text-indigo-600" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-[10px] font-black text-slate-400 uppercase leading-none mb-1">Bank Info</p>
+                                    <p className="text-xs font-black text-indigo-900 truncate">
+                                        {profile.bank_account_number ? `${profile.bank_name} • ${profile.bank_account_number}` : "NOT SET - GO TO PROFILE"}
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <DialogFooter className="sm:justify-start gap-4">
+                        <Button 
+                            onClick={handleWithdraw}
+                            disabled={isProcessingWithdraw || !withdrawAmount}
+                            className="w-full h-16 bg-slate-900 hover:bg-slate-800 text-white font-black text-sm uppercase tracking-widest rounded-3xl shadow-xl active:scale-95 transition-all"
+                        >
+                            {isProcessingWithdraw ? <Loader2 className="animate-spin" /> : "REQUEST WITHDRAWAL"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 };

@@ -20,9 +20,10 @@ interface ChatProps {
   rideId: string;
   onClose: () => void;
   receiverName: string;
+  receiverAvatar?: string;
 }
 
-export const ChatInterface: React.FC<ChatProps> = ({ rideId, onClose, receiverName }) => {
+export const ChatInterface: React.FC<ChatProps> = ({ rideId, onClose, receiverName, receiverAvatar }) => {
   const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
