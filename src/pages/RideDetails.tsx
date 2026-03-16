@@ -398,11 +398,14 @@ const RideDetails = () => {
           <Card className="card-taxi p-5 overflow-hidden animate-scale-in border-l-4 border-l-primary shadow-lg">
             <div className="flex items-center space-x-4">
               <div className="relative">
-                <Avatar className="w-16 h-16 border-2 border-primary/20 p-0.5">
-                  <AvatarImage src="/api/placeholder/64/64" />
-                  <AvatarFallback className="bg-primary text-primary-foreground font-bold text-xl">
-                    DR
-                  </AvatarFallback>
+                <Avatar className="w-16 h-16 border-2 border-primary/20 p-0.5 rounded-2xl">
+                  {driverInfo?.avatar_url ? (
+                    <AvatarImage src={driverInfo.avatar_url} className="object-cover rounded-2xl" />
+                  ) : (
+                    <AvatarFallback className="bg-primary text-black font-black text-xl rounded-2xl">
+                      {driverInfo?.full_name?.charAt(0) || "D"}
+                    </AvatarFallback>
+                  )}
                 </Avatar>
                 <div className="absolute -bottom-1 -right-1 bg-green-500 w-5 h-5 rounded-full border-2 border-background flex items-center justify-center">
                     <CheckCircle2 className="w-3 h-3 text-white" />

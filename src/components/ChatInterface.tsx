@@ -107,8 +107,12 @@ export const ChatInterface: React.FC<ChatProps> = ({ rideId, onClose, receiverNa
       {/* Header */}
       <div className="bg-primary p-4 flex items-center justify-between text-black">
         <div className="flex items-center space-x-3">
-          <div className="bg-black/10 p-2 rounded-xl">
-            <MessageSquare className="w-5 h-5" />
+          <div className="bg-black/10 w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
+            {receiverAvatar ? (
+               <img src={receiverAvatar} alt={receiverName} className="w-full h-full object-cover" />
+            ) : (
+                <User className="w-5 h-5" />
+            )}
           </div>
           <div>
             <p className="text-[10px] font-black uppercase tracking-widest opacity-60 leading-none mb-1">Chatting with</p>

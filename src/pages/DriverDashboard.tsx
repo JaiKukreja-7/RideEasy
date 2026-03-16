@@ -139,6 +139,7 @@ const DriverDashboard = () => {
     const [otpInput, setOtpInput] = useState('');
     const [showChat, setShowChat] = useState(false);
     const [customerInfo, setCustomerInfo] = useState<{full_name: string, avatar_url?: string} | null>(null);
+    const [isUploadingPfp, setIsUploadingPfp] = useState(false);
     const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
     const [withdrawAmount, setWithdrawAmount] = useState('');
     const [payoutMethod, setPayoutMethod] = useState<'upi' | 'bank'>('upi');
@@ -322,37 +323,114 @@ const DriverDashboard = () => {
         }
     };
 
+    const handlePfpUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !user) return;
+
+        // Validate file type
+        if (!file.type.startsWith('image/')) {
+            toast.error("Please upload an image file");
+            return;
+        }
+
+        // Validate file size (max 5MB)
+        if (file.size > 5 * 1024 * 1024) {
+            toast.error("File size should be less than 5MB");
+            return;
+        }
+
+        setIsUploadingPfp(true);
+        try {
+            const fileExt = file.name.split('.').pop();
+            const fileName = `${user.id}/${Math.random()}.${fileExt}`;
+            const filePath = `${fileName}`;
+
+            // 1. Upload to Supabase Storage
+            const { error: uploadError } = await supabase.storage
+                .from('avatars')
+                .upload(filePath, file, { upsert: true });
+
+            if (uploadError) throw uploadError;
+
+            // 2. Get Public URL
+            const { data: { publicUrl } } = supabase.storage
+                .from('avatars')
+                .getPublicUrl(filePath);
+
+            // 3. Update Profile
+            const { error: updateError } = await supabase
+                .from('profiles')
+                .update({ avatar_url: publicUrl })
+                .eq('id', user.id);
+
+            if (updateError) throw updateError;
+
+            setProfile(prev => ({ ...prev, avatar_url: publicUrl }));
+            toast.success("Profile picture updated!");
+        } catch (err: any) {
+            toast.error(err.message || "Failed to upload image");
+            console.error(err);
+        } finally {
+            setIsUploadingPfp(false);
+        }
+    };
+
     const handlePurchasePass = async (plan: string, days: number, price: number) => {
         if (!user) return;
-        try {
-            const endDate = new Date();
-            endDate.setDate(endDate.getDate() + days);
+        
+        const options = {
+            key: import.meta.env.VITE_RAZORPAY_KEY_ID,
+            amount: price * 100, // Amount in paise
+            currency: "INR",
+            name: "RideEasy",
+            description: `${plan} Subscription`,
+            image: "https://your-logo-url.com", // Add your logo URL
+            handler: async (response: any) => {
+                if (response.razorpay_payment_id) {
+                    try {
+                        const endDate = new Date();
+                        endDate.setDate(endDate.getDate() + days);
 
-            const { error } = await supabase.from('driver_subscriptions').insert({
-                user_id: user.id,
-                plan_name: plan,
-                price: price,
-                status: 'active',
-                end_date: endDate.toISOString()
-            });
+                        const { error } = await supabase.from('driver_subscriptions').insert({
+                            user_id: user.id,
+                            plan_name: plan,
+                            price: price,
+                            status: 'active',
+                            end_date: endDate.toISOString(),
+                            payment_id: response.razorpay_payment_id
+                        });
 
-            if (error) throw error;
+                        if (error) throw error;
 
-            toast.success(`${plan} Activated!`);
-            // Refresh sub
-            const { data } = await supabase
-                .from('driver_subscriptions')
-                .select('*')
-                .eq('user_id', user.id)
-                .eq('status', 'active')
-                .gt('end_date', new Date().toISOString())
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
-            setActiveSubscription(data);
-        } catch (err) {
-            toast.error("Purchase failed");
-        }
+                        toast.success(`${plan} Activated!`);
+                        
+                        // Refresh sub
+                        const { data } = await supabase
+                            .from('driver_subscriptions')
+                            .select('*')
+                            .eq('user_id', user.id)
+                            .eq('status', 'active')
+                            .gt('end_date', new Date().toISOString())
+                            .order('created_at', { ascending: false })
+                            .limit(1)
+                            .maybeSingle();
+                        setActiveSubscription(data);
+                    } catch (err) {
+                        toast.error("Failed to activate pass");
+                    }
+                }
+            },
+            prefill: {
+                name: profile.full_name,
+                email: user.email,
+            },
+            theme: {
+                color: "#FFD300",
+            },
+        };
+
+        const rzp = new (window as any).Razorpay(options);
+        rzp.open();
     };
 
     useEffect(() => {
@@ -1026,7 +1104,7 @@ const DriverDashboard = () => {
                                         <Button 
                                             onClick={() => handlePurchasePass(plan.name, plan.days, plan.price)}
                                             disabled={activeSubscription?.plan_name === plan.name}
-                                            className={`w-full mt-6 h-14 font-black rounded-2xl text-white ${plan.popular ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-slate-900 hover:bg-slate-800'}`}
+                                            className={`w-full mt-6 h-14 font-black rounded-2xl ${activeSubscription?.plan_name === plan.name ? 'bg-slate-100 text-slate-400' : 'btn-taxi text-black hover:scale-100 shadow-none'}`}
                                         >
                                             {activeSubscription?.plan_name === plan.name ? 'CURRENT PLAN' : 'ACTIVATE NOW'}
                                         </Button>
@@ -1067,16 +1145,21 @@ const DriverDashboard = () => {
                                             )}
                                         </div>
                                         <div className="space-y-2 w-full px-6">
-                                            <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400 text-center block">Profile Picture URL</Label>
-                                            <div className="relative">
+                                            <Label className="text-[10px] font-black uppercase tracking-widest text-slate-400 text-center block">Update Profile Picture</Label>
+                                            <div className="relative flex justify-center">
                                                 <input 
-                                                    type="text" 
-                                                    value={profile.avatar_url}
-                                                    onChange={(e) => setProfile({ ...profile, avatar_url: e.target.value })}
-                                                    placeholder="Paste image link here"
-                                                    className="w-full h-12 bg-white border-none rounded-xl px-4 text-xs font-bold focus:ring-2 focus:ring-primary/20 outline-none transition-all"
+                                                    type="file" 
+                                                    accept="image/*"
+                                                    onChange={handlePfpUpload}
+                                                    className="hidden"
+                                                    id="pfp-upload"
                                                 />
-                                                <Camera className="absolute right-4 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-300" />
+                                                <Label 
+                                                    htmlFor="pfp-upload"
+                                                    className="btn-taxi h-10 px-6 flex items-center justify-center cursor-pointer text-[10px] font-black uppercase tracking-widest text-black hover:scale-105 transition-all shadow-none"
+                                                >
+                                                    {isUploadingPfp ? <Loader2 className="w-4 h-4 animate-spin" /> : "Select File"}
+                                                </Label>
                                             </div>
                                         </div>
                                     </div>
@@ -1169,9 +1252,9 @@ const DriverDashboard = () => {
                                 <Button 
                                     onClick={handleUpdateProfile}
                                     disabled={isUpdatingProfile}
-                                    className="w-full h-14 bg-slate-900 hover:bg-slate-800 font-black rounded-2xl shadow-lg transition-all active:scale-95 text-white"
+                                    className="w-full h-14 btn-taxi font-black text-black rounded-2xl shadow-lg transition-all active:scale-95 hover:scale-100"
                                 >
-                                    {isUpdatingProfile ? <Loader2 className="animate-spin text-white" /> : "SAVE CHANGES"}
+                                    {isUpdatingProfile ? <Loader2 className="animate-spin" /> : "SAVE CHANGES"}
                                 </Button>
                             </Card>
 

@@ -14,8 +14,11 @@ import {
   LogOut,
   Car,
   History,
-  Zap
+  Zap,
+  Camera,
+  Loader2
 } from "lucide-react";
+import { Label } from "@/components/ui/label";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { supabase } from "@/lib/supabase";
@@ -41,6 +44,10 @@ const Home = () => {
   const [pickupCoords, setPickupCoords] = useState<{ lat: number, lng: number } | null>(null);
   const [destinationCoords, setDestinationCoords] = useState<{ lat: number, lng: number } | null>(null);
   const [userFavorites, setUserFavorites] = useState<any[]>([]);
+  const [profile, setProfile] = useState({ full_name: '', avatar_url: '' });
+  const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+  const [routePath, setRoutePath] = useState<[number, number][]>([]);
+  const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
 
   const navigate = useNavigate();
   const { user, role, signOut, loading } = useAuth();
@@ -53,6 +60,7 @@ const Home = () => {
         navigate("/driver-dashboard");
       } else {
         fetchFavorites();
+        fetchProfile();
       }
     }
   }, [user, role, loading, navigate]);
@@ -138,6 +146,99 @@ const Home = () => {
         lng: Number(d.lng),
         angle: 0
       })));
+    }
+  };
+
+  // Fetch Route when both coords are present
+  useEffect(() => {
+    if (pickupCoords && destinationCoords) {
+        fetchRoute();
+    } else {
+        setRoutePath([]);
+    }
+  }, [pickupCoords, destinationCoords]);
+
+  const fetchRoute = async () => {
+    if (!pickupCoords || !destinationCoords) return;
+    
+    setIsCalculatingRoute(true);
+    try {
+        const res = await fetch(
+            `https://router.project-osrm.org/route/v1/driving/${pickupCoords.lng},${pickupCoords.lat};${destinationCoords.lng},${destinationCoords.lat}?overview=full&geometries=geojson`
+        );
+        const data = await res.json();
+        
+        if (data.routes && data.routes[0]) {
+            setRoutePath(data.routes[0].geometry.coordinates);
+        }
+    } catch (err) {
+        console.error("Routing error:", err);
+    } finally {
+        setIsCalculatingRoute(false);
+    }
+  };
+
+  const fetchProfile = async () => {
+    if (!user) return;
+    const { data } = await supabase.from('profiles').select('full_name, avatar_url').eq('id', user.id).single();
+    if (data) setProfile({ full_name: data.full_name || '', avatar_url: data.avatar_url || '' });
+  };
+
+  const [isUploadingPfp, setIsUploadingPfp] = useState(false);
+
+  const handlePfpUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    if (!file.type.startsWith('image/')) {
+        toast.error("Please upload an image file");
+        return;
+    }
+
+    setIsUploadingPfp(true);
+    try {
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${user.id}/${Math.random()}.${fileExt}`;
+        const filePath = `${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+            .from('avatars')
+            .upload(filePath, file, { upsert: true });
+
+        if (uploadError) throw uploadError;
+
+        const { data: { publicUrl } } = supabase.storage
+            .from('avatars')
+            .getPublicUrl(filePath);
+
+        const { error: updateError } = await supabase
+            .from('profiles')
+            .update({ avatar_url: publicUrl })
+            .eq('id', user.id);
+
+        if (updateError) throw updateError;
+
+        setProfile(prev => ({ ...prev, avatar_url: publicUrl }));
+        toast.success("Profile picture updated!");
+    } catch (err: any) {
+        toast.error("Failed to upload image");
+    } finally {
+        setIsUploadingPfp(false);
+    }
+  };
+
+  const handleUpdateProfile = async (updates: Partial<{full_name: string, avatar_url: string}>) => {
+    if (!user) return;
+    setIsUpdatingProfile(true);
+    try {
+      const { error } = await supabase.from('profiles').update(updates).eq('id', user.id);
+      if (error) throw error;
+      setProfile(prev => ({ ...prev, ...updates }));
+      toast.success("Profile updated!");
+    } catch (e) {
+      toast.error("Failed to update profile");
+    } finally {
+      setIsUpdatingProfile(false);
     }
   };
 
@@ -262,18 +363,26 @@ const Home = () => {
           <div className="flex items-center space-x-3">
             <Sheet>
                 <SheetTrigger asChild>
-                    <Button variant="ghost" size="icon" className="rounded-xl">
-                        <Menu className="w-5 h-5" />
+                    <Button variant="ghost" size="icon" className="rounded-xl overflow-hidden p-0 border-2 border-primary/20 bg-white h-10 w-10">
+                        {profile.avatar_url ? (
+                            <img src={profile.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                        ) : (
+                            <Menu className="w-5 h-5 text-primary" />
+                        )}
                     </Button>
                 </SheetTrigger>
                 <SheetContent side="left" className="w-[300px] p-0">
                     <SheetHeader className="p-6 bg-primary text-primary-foreground">
                         <div className="flex items-center space-x-3 text-left">
-                            <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center">
-                                <User className="w-6 h-6" />
+                            <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center overflow-hidden">
+                                {profile.avatar_url ? (
+                                    <img src={profile.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                                ) : (
+                                    <User className="w-6 h-6" />
+                                )}
                             </div>
                             <div>
-                                <SheetTitle className="text-primary-foreground font-black text-lg truncate w-[180px]">{user?.email}</SheetTitle>
+                                <SheetTitle className="text-primary-foreground font-black text-lg truncate w-[180px]">{profile.full_name || user?.email}</SheetTitle>
                                 <p className="text-xs font-bold uppercase tracking-widest opacity-80">{role}</p>
                             </div>
                         </div>
@@ -314,12 +423,47 @@ const Home = () => {
                             <LogOut className="w-5 h-5 mr-4" />
                             Logout
                         </Button>
+                        
+                        <div className="pt-6 mt-6 border-t px-4">
+                            <div className="font-black uppercase text-[10px] tracking-widest text-muted-foreground mb-4">Profile Settings</div>
+                            <div className="space-y-4">
+                                <div className="space-y-1">
+                                    <label className="text-[9px] font-black uppercase text-slate-400">Display Name</label>
+                                    <input 
+                                        type="text" 
+                                        className="w-full bg-slate-50 border-none rounded-xl h-10 px-3 text-xs font-bold focus:ring-2 focus:ring-primary/20 outline-none"
+                                        placeholder="Your Name"
+                                        value={profile.full_name}
+                                        onBlur={(e) => handleUpdateProfile({ full_name: e.target.value })}
+                                        onChange={(e) => setProfile(prev => ({ ...prev, full_name: e.target.value }))}
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-[9px] font-black uppercase text-slate-400">Profile Picture</label>
+                                    <div className="flex space-x-2">
+                                        <input 
+                                            type="file" 
+                                            accept="image/*"
+                                            onChange={handlePfpUpload}
+                                            className="hidden"
+                                            id="rider-pfp-upload"
+                                        />
+                                        <Label 
+                                            htmlFor="rider-pfp-upload"
+                                            className="flex-1 bg-slate-50 border-none rounded-xl h-10 px-3 text-[10px] font-black uppercase tracking-widest flex items-center justify-center cursor-pointer hover:bg-slate-100 transition-all"
+                                        >
+                                            {isUploadingPfp ? <Loader2 className="w-4 h-4 animate-spin" /> : "Choose Photo"}
+                                        </Label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </SheetContent>
             </Sheet>
             <div>
-              <p className="text-sm text-muted-foreground leading-none mb-1">Welcome</p>
-              <p className="font-bold text-sm truncate max-w-[150px]">{user?.email}</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground leading-none mb-1">Welcome</p>
+              <p className="font-black text-sm truncate max-w-[150px] uppercase tracking-tight">{profile.full_name || user?.email?.split('@')[0]}</p>
             </div>
           </div>
           <div className="flex items-center space-x-2">
@@ -339,6 +483,7 @@ const Home = () => {
             drivers={nearbyDrivers}
             pickup={pickupCoords ? [pickupCoords.lng, pickupCoords.lat] : undefined}
             destination={destinationCoords ? [destinationCoords.lng, destinationCoords.lat] : undefined}
+            route={routePath}
             onLocateMe={async () => {
                 try {
                     toast.info("Finding your location...");

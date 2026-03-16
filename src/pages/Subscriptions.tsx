@@ -98,37 +98,81 @@ const Subscriptions = () => {
             return;
         }
 
-        setLoading(true);
-        try {
-            // In a real app, this would trigger Razorpay
-            // Here we simulate successful payment and update DB
-            
-            // 1. Deactivate old subscription if any
-            await supabase
-                .from('subscriptions')
-                .update({ status: 'expired' })
-                .eq('user_id', user.id);
+        const plan = plans.find(p => p.id === planId);
+        if (!plan) return;
 
-            // 2. Create new subscription
-            const { error } = await supabase
-                .from('subscriptions')
-                .insert({
+        // Free plan doesn't need Razorpay
+        if (planId === 'free') {
+            setLoading(true);
+            try {
+                await supabase.from('subscriptions').update({ status: 'expired' }).eq('user_id', user.id);
+                const { error } = await supabase.from('subscriptions').insert({
                     user_id: user.id,
                     plan_type: planId,
                     status: 'active',
                     start_date: new Date().toISOString(),
                 });
-
-            if (error) throw error;
-
-            toast.success(`Successfully subscribed to ${planId.toUpperCase()}!`);
-            fetchSubscription();
-            
-        } catch (error: any) {
-            toast.error(error.message || "Subscription failed");
-        } finally {
-            setLoading(false);
+                if (error) throw error;
+                toast.success(`Successfully subscribed to ${planId.toUpperCase()}!`);
+                fetchSubscription();
+            } catch (error: any) {
+                toast.error(error.message || "Subscription failed");
+            } finally {
+                setLoading(false);
+            }
+            return;
         }
+
+        const price = parseInt(plan.price.replace('₹', ''));
+        
+        const options = {
+            key: import.meta.env.VITE_RAZORPAY_KEY_ID,
+            amount: price * 100,
+            currency: "INR",
+            name: "RideEasy",
+            description: `${plan.name} Subscription`,
+            handler: async (response: any) => {
+                if (response.razorpay_payment_id) {
+                    setLoading(true);
+                    try {
+                        // 1. Deactivate old subscription
+                        await supabase
+                            .from('subscriptions')
+                            .update({ status: 'expired' })
+                            .eq('user_id', user.id);
+
+                        // 2. Create new subscription
+                        const { error } = await supabase
+                            .from('subscriptions')
+                            .insert({
+                                user_id: user.id,
+                                plan_type: planId,
+                                status: 'active',
+                                start_date: new Date().toISOString(),
+                                payment_id: response.razorpay_payment_id
+                            });
+
+                        if (error) throw error;
+
+                        toast.success(`Successfully subscribed to ${planId.toUpperCase()}!`);
+                        fetchSubscription();
+                    } catch (error: any) {
+                        toast.error(error.message || "Activation failed");
+                    } finally {
+                        setLoading(false);
+                    }
+                }
+            },
+            prefill: {
+                email: user.email,
+            },
+            theme: {
+                color: "#FFD300",
+            },
+        };
+
+        const rzp = new (window as any).Razorpay(options);
+        rzp.open();
     };
 
     return (
