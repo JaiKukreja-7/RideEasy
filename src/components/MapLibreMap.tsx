@@ -64,8 +64,13 @@ const MapLibreMap: React.FC<MapProps> = ({
     map.current.addControl(new maplibregl.AttributionControl(), 'bottom-left');
 
     map.current.on('load', () => {
-      console.log("Map loaded successfully");
+      console.log("MapLibre: Map loaded");
+      drawRoute(); 
       map.current?.resize();
+    });
+
+    map.current.on('styledata', () => {
+      drawRoute(); 
     });
 
     map.current.on('click', (e) => {
@@ -142,94 +147,65 @@ const MapLibreMap: React.FC<MapProps> = ({
     });
   }, [drivers]);
 
-  // Update Route
-  useEffect(() => {
+  const drawRoute = () => {
     if (!map.current) return;
+    if (!map.current.isStyleLoaded()) {
+      map.current.once('style.load', drawRoute);
+      return;
+    }
 
-    const drawRoute = () => {
-      if (!map.current) return;
-      if (!map.current.isStyleLoaded()) {
-        map.current.once('style.load', drawRoute);
-        return;
+    // 1. FULL ROUTE (THE TOTAL PATH — faint dashed line)
+    if (fullRoute && fullRoute.length > 0) {
+      console.log("FULL ROUTE:", fullRoute.length, "points");
+      const sourceId = 'full-route-source';
+      const layerId  = 'full-route-layer';
+      const geojson: any = { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: fullRoute }};
+      
+      if (map.current.getSource(sourceId)) {
+        try { (map.current.getSource(sourceId) as any).setData(geojson); } catch(_) {}
+      } else {
+        map.current.addSource(sourceId, { type: 'geojson', data: geojson });
+        map.current.addLayer({
+          id: layerId, type: 'line', source: sourceId,
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#94a3b8', 'line-width': 3, 'line-opacity': 0.4, 'line-dasharray': [2, 3] }
+        });
       }
+      if (map.current.getLayer(layerId)) map.current.moveLayer(layerId);
+    }
 
-      // 1. FULL ROUTE (THE TOTAL PATH)
-      if (fullRoute && fullRoute.length > 0) {
-        console.log("FULL ROUTE:", fullRoute);
-        const sourceId = 'full-route-source';
-        const layerId = 'full-route-layer';
-        const geojson: any = { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: fullRoute }};
-        
-        const source = map.current.getSource(sourceId);
-        if (source) {
-            (source as any).setData(geojson);
-        } else {
-            map.current.addSource(sourceId, { type: 'geojson', data: geojson, lineMetrics: true });
-            map.current.addLayer({
-                id: layerId,
-                type: 'line',
-                source: sourceId,
-                layout: { 'line-join': 'round', 'line-cap': 'round' },
-                paint: { 'line-color': '#1e293b', 'line-width': 6, 'line-opacity': 0.15, 'line-dasharray': [2, 2] }
-            });
-        }
-        if (map.current.getLayer(layerId)) {
-            map.current.moveLayer(layerId);
-        }
+    // 2. ACTIVE ROUTE (REMAINING PATH — solid black)
+    // lineMetrics intentionally omitted — it causes 'jt is not defined' crash
+    // in MapLibre when setData() is called after line-gradient is applied.
+    if (route && route.length > 0) {
+      console.log("ACTIVE ROUTE:", route.length, "points");
+      const sourceId = 'active-route-source';
+      const layerId  = 'active-route-layer';
+      const casingId = 'active-route-casing';
+      const geojson: any = { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: route }};
+
+      if (map.current.getSource(sourceId)) {
+        try { (map.current.getSource(sourceId) as any).setData(geojson); } catch(_) {}
+      } else {
+        map.current.addSource(sourceId, { type: 'geojson', data: geojson });
+        map.current.addLayer({
+          id: casingId, type: 'line', source: sourceId,
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#ffffff', 'line-width': 9, 'line-opacity': 1 }
+        });
+        map.current.addLayer({
+          id: layerId, type: 'line', source: sourceId,
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#1e293b', 'line-width': 5, 'line-opacity': 1 }
+        });
       }
+      if (map.current.getLayer(casingId)) map.current.moveLayer(casingId);
+      if (map.current.getLayer(layerId))  map.current.moveLayer(layerId);
+    }
+  };
 
-      // 2. ACTIVE ROUTE (THE REMAINING PATH)
-      if (route && route.length > 0) {
-        console.log("ACTIVE ROUTE:", route);
-        const sourceId = 'active-route-source';
-        const layerId = 'active-route-layer';
-        const casingId = 'active-route-casing';
-        const geojson: any = { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: route }};
-
-        const source = map.current.getSource(sourceId);
-        if (source) {
-            (source as any).setData(geojson);
-        } else {
-            map.current.addSource(sourceId, { type: 'geojson', data: geojson, lineMetrics: true });
-            
-            // Casing
-            map.current.addLayer({
-                id: casingId,
-                type: 'line',
-                source: sourceId,
-                layout: { 'line-join': 'round', 'line-cap': 'round' },
-                paint: { 'line-color': '#ffffff', 'line-width': 10, 'line-opacity': 1 }
-            });
-
-            // Main Gradient Route
-            map.current.addLayer({
-                id: layerId,
-                type: 'line',
-                source: sourceId,
-                layout: { 'line-join': 'round', 'line-cap': 'round' },
-                paint: { 
-                    'line-width': 6, 
-                    'line-opacity': 1,
-                    'line-gradient': [
-                        'interpolate',
-                        ['linear'],
-                        ['line-progress'],
-                        0, '#000000',  // Sharp start
-                        1, '#475569'   // Faded end
-                    ]
-                }
-            });
-        }
-        
-        if (map.current.getLayer(casingId)) {
-            map.current.moveLayer(casingId);
-        }
-        if (map.current.getLayer(layerId)) {
-            map.current.moveLayer(layerId);
-        }
-      }
-    };
-
+  // Re-draw whenever route data changes
+  useEffect(() => {
     drawRoute();
   }, [route, fullRoute]);
 
