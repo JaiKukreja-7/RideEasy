@@ -1,7 +1,7 @@
 -- Create user_favorites table
 CREATE TABLE IF NOT EXISTS user_favorites (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES auth.users(id) NOT NULL,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
     label TEXT NOT NULL, -- 'Home', 'Work', 'Loved'
     address TEXT NOT NULL,
     lat DECIMAL(10,8),
@@ -15,10 +15,12 @@ CREATE TABLE IF NOT EXISTS user_favorites (
 ALTER TABLE user_favorites ENABLE ROW LEVEL SECURITY;
 
 -- Policies
+drop policy if exists "Users can view their own favorites" on user_favorites;
 CREATE POLICY "Users can view their own favorites" 
 ON user_favorites FOR SELECT 
 USING (auth.uid() = user_id);
 
+drop policy if exists "Users can insert/update their own favorites" on user_favorites;
 CREATE POLICY "Users can insert/update their own favorites" 
 ON user_favorites FOR ALL 
 USING (auth.uid() = user_id);

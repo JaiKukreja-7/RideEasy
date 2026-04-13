@@ -2,7 +2,7 @@
 create table if not exists ride_messages (
   id uuid default gen_random_uuid() primary key,
   ride_id uuid references rides(id) on delete cascade not null,
-  sender_id uuid references profiles(id) not null,
+  sender_id uuid references profiles(id) on delete cascade not null,
   content text not null,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );

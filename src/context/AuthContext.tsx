@@ -31,7 +31,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         supabase.auth.getSession().then(({ data: { session } }) => {
             setUser(session?.user ?? null);
             if (session?.user) {
-                fetchUserRole(session.user.id);
+                fetchUserRole(session.user);
             } else {
                 setLoading(false);
             }
@@ -41,7 +41,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
             setUser(session?.user ?? null);
             if (session?.user) {
-                fetchUserRole(session.user.id);
+                fetchUserRole(session.user);
             } else {
                 setRole(null);
                 setLoading(false);
@@ -51,22 +51,40 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         return () => subscription.unsubscribe();
     }, []);
 
-    const fetchUserRole = async (userId: string) => {
+    const fetchUserRole = async (user: User) => {
+        const userId = user.id;
         try {
             // Process intended role from OAuth sign-ups
             const intendedRole = localStorage.getItem('intended_role');
-            if (intendedRole) {
-                const { error: updateError } = await supabase
+            
+            // Always ensure a profile exists for the logged in user
+            const { data: existingProfile } = await supabase
+                .from("profiles")
+                .select("role")
+                .eq("id", userId)
+                .single();
+
+            if (!existingProfile || intendedRole) {
+                const { error: upsertError } = await supabase
                     .from("profiles")
-                    .update({ role: intendedRole })
-                    .eq("id", userId);
+                    .upsert({ 
+                        id: userId, 
+                        role: intendedRole || existingProfile?.role || 'customer',
+                        email: user.email,
+                        full_name: user.user_metadata?.full_name || user.user_metadata?.name,
+                    }, { onConflict: 'id' });
                 
-                if (!updateError) {
-                    console.log(`[Auth] Automatically assigned user ${userId} to role: ${intendedRole}`);
+                if (!upsertError) {
+                    if (intendedRole) {
+                        console.log(`[Auth] Assigned user ${userId} to intended role: ${intendedRole}`);
+                    }
                     localStorage.removeItem('intended_role');
+                } else {
+                    console.error("[Auth] Profile sync error:", upsertError);
                 }
             }
 
+            // Finally, fetch the role to update state
             const { data, error } = await supabase
                 .from("profiles")
                 .select("role")

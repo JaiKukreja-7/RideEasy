@@ -1,7 +1,7 @@
 -- Phase 3: Subscription System
 create table if not exists subscriptions (
   id uuid default gen_random_uuid() primary key,
-  user_id uuid references profiles(id) not null,
+  user_id uuid references profiles(id) on delete cascade not null,
   plan_type text check (plan_type in ('free', 'silver', 'gold', 'platinum')),
   status text default 'active',
   start_date timestamp with time zone default now(),
@@ -12,9 +12,9 @@ create table if not exists subscriptions (
 -- Phase 5: Ratings & Feedback
 create table if not exists ratings (
   id uuid default gen_random_uuid() primary key,
-  ride_id uuid references rides(id) not null,
-  reviewer_id uuid references profiles(id) not null,
-  reviewee_id uuid references profiles(id) not null,
+  ride_id uuid references rides(id) on delete cascade not null,
+  reviewer_id uuid references profiles(id) on delete cascade not null,
+  reviewee_id uuid references profiles(id) on delete cascade not null,
   rating integer check (rating >= 1 and rating <= 5),
   feedback text,
   created_at timestamp with time zone default now()
@@ -43,12 +43,15 @@ alter table subscriptions enable row level security;
 alter table ratings enable row level security;
 alter table coupons enable row level security;
 
+drop policy if exists "Users can view their own subscription" on subscriptions;
 create policy "Users can view their own subscription"
   on subscriptions for select using ( auth.uid() = user_id );
 
+drop policy if exists "Users can view ratings related to them" on ratings;
 create policy "Users can view ratings related to them"
   on ratings for select using ( auth.uid() = reviewer_id or auth.uid() = reviewee_id );
 
+drop policy if exists "Anyone can view active coupons" on coupons;
 create policy "Anyone can view active coupons"
   on coupons for select using ( is_active = true );
 

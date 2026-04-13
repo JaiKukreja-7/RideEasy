@@ -16,7 +16,7 @@ END $$;
 
 -- 2. DRIVER LOCATIONS TABLE
 create table if not exists driver_locations (
-  user_id uuid references profiles(id) primary key,
+  user_id uuid references profiles(id) on delete cascade primary key,
   lat numeric not null,
   lng numeric not null,
   is_online boolean default true,
@@ -42,24 +42,26 @@ DO $$ BEGIN
     END IF;
 END $$;
 
-create table ratings (
+create table if not exists ratings (
     id uuid default gen_random_uuid() primary key,
-    ride_id uuid references rides(id) unique not null,
-    reviewer_id uuid references profiles(id) not null,
-    reviewee_id uuid references profiles(id) not null,
+    ride_id uuid references rides(id) on delete cascade unique not null,
+    reviewer_id uuid references profiles(id) on delete cascade not null,
+    reviewee_id uuid references profiles(id) on delete cascade not null,
     rating integer check (rating >= 1 and rating <= 5) not null,
     feedback text,
     created_at timestamp with time zone default now()
 );
 
 alter table ratings enable row level security;
+drop policy if exists "Everyone can insert ratings" on ratings;
 create policy "Everyone can insert ratings" on ratings for insert with check (true);
+drop policy if exists "Everyone can view ratings" on ratings;
 create policy "Everyone can view ratings" on ratings for select using (true);
 
 -- 4. SUBSCRIPTIONS TABLE & POLICIES
 create table if not exists subscriptions (
   id uuid default gen_random_uuid() primary key,
-  user_id uuid references profiles(id) not null,
+  user_id uuid references profiles(id) on delete cascade not null,
   plan_type text check (plan_type in ('free', 'silver', 'gold', 'platinum')),
   status text default 'active',
   start_date timestamp with time zone default now(),

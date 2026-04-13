@@ -3,12 +3,29 @@
 -- Run this in the Supabase SQL Editor
 -- ============================================================
 
--- 1. Add rides table to the realtime publication
---    Without this, postgres_changes subscriptions on 'rides' receive NOTHING.
-alter publication supabase_realtime add table rides;
+-- 1. Add rides table to the realtime publication safely
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables 
+    where pubname = 'supabase_realtime' 
+    and tablename = 'rides'
+  ) then
+    alter publication supabase_realtime add table rides;
+  end if;
+end $$;
 
--- 2. Add driver_locations so the rider can track the driver
-alter publication supabase_realtime add table driver_locations;
+-- 2. Add driver_locations so the rider can track the driver safely
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables 
+    where pubname = 'supabase_realtime' 
+    and tablename = 'driver_locations'
+  ) then
+    alter publication supabase_realtime add table driver_locations;
+  end if;
+end $$;
 
 -- 3. Fix RLS so the realtime change is visible to BOTH customer and driver
 --    The existing policy only allowed customers to see their OWN rides,
@@ -19,6 +36,7 @@ alter publication supabase_realtime add table driver_locations;
 drop policy if exists "Customers can view their own rides" on rides;
 
 -- Unified read policy: customers see their rides, drivers see assigned/requested, admins see all
+drop policy if exists "Rides are readable by participants and drivers" on rides;
 create policy "Rides are readable by participants and drivers"
   on rides for select
   using (

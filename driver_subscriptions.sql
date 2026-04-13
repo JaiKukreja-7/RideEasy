@@ -18,10 +18,12 @@ CREATE TABLE IF NOT EXISTS driver_subscriptions (
 ALTER TABLE driver_subscriptions ENABLE ROW LEVEL SECURITY;
 
 -- 3. Policies
+drop policy if exists "Drivers can view their own subscriptions" on driver_subscriptions;
 CREATE POLICY "Drivers can view their own subscriptions" 
 ON driver_subscriptions FOR SELECT 
 USING (auth.uid() = user_id);
 
+drop policy if exists "Drivers can insert subscriptions" on driver_subscriptions;
 CREATE POLICY "Drivers can insert subscriptions" 
 ON driver_subscriptions FOR INSERT 
 WITH CHECK (auth.uid() = user_id);

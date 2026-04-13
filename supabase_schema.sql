@@ -1,5 +1,5 @@
 -- Create a table for public user profiles
-create table profiles (
+create table if not exists profiles (
   id uuid references auth.users not null primary key,
   email text,
   full_name text,
@@ -12,23 +12,26 @@ create table profiles (
 alter table profiles enable row level security;
 
 -- Create policies for profiles
+drop policy if exists "Public profiles are viewable by everyone." on profiles;
 create policy "Public profiles are viewable by everyone."
   on profiles for select
   using ( true );
 
+drop policy if exists "Users can insert their own profile." on profiles;
 create policy "Users can insert their own profile."
   on profiles for insert
   with check ( auth.uid() = id );
 
+drop policy if exists "Users can update own profile." on profiles;
 create policy "Users can update own profile."
   on profiles for update
   using ( auth.uid() = id );
 
 -- Create a table for rides
-create table rides (
+create table if not exists rides (
   id uuid default gen_random_uuid() primary key,
-  customer_id uuid references profiles(id) not null,
-  driver_id uuid references profiles(id),
+  customer_id uuid references profiles(id) on delete cascade not null,
+  driver_id uuid references profiles(id) on delete set null,
   pickup_address text not null,
   dropoff_address text not null,
   status text check (status in ('requested', 'accepted', 'in_progress', 'completed', 'cancelled')) default 'requested',
@@ -46,11 +49,13 @@ alter table rides enable row level security;
 
 -- Policies for rides
 -- 1. Customers can see their own rides
+drop policy if exists "Customers can view their own rides" on rides;
 create policy "Customers can view their own rides"
   on rides for select
   using ( auth.uid() = customer_id );
 
 -- 2. Drivers can see available requested rides AND rides they accepted
+drop policy if exists "Drivers can view requested or assigned rides" on rides;
 create policy "Drivers can view requested or assigned rides"
   on rides for select
   using ( 
@@ -60,11 +65,13 @@ create policy "Drivers can view requested or assigned rides"
   );
 
 -- 3. Customers can insert (request) rides
+drop policy if exists "Customers can request rides" on rides;
 create policy "Customers can request rides"
   on rides for insert
   with check ( auth.uid() = customer_id );
 
 -- 4. Drivers can update rides (accept, complete)
+drop policy if exists "Drivers can update assigned rides" on rides;
 create policy "Drivers can update assigned rides"
   on rides for update
   using ( driver_id = auth.uid() OR driver_id is null ) 
