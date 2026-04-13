@@ -79,7 +79,7 @@ const RideDetails = () => {
 
     fetchRideDetails();
 
-    // Subscribe to changes for this specific ride
+    // --- Realtime subscription (primary) ---
     const channel = supabase
       .channel(`ride:${rideId}`)
       .on('postgres_changes', {
@@ -88,15 +88,47 @@ const RideDetails = () => {
         table: 'rides',
         filter: `id=eq.${rideId}`
       }, (payload) => {
-        setRide(payload.new as Ride);
-        if (payload.new.status !== payload.old.status) {
-           toast.info(`Ride status: ${payload.new.status.toUpperCase()}`);
+        const updatedRide = payload.new as Ride;
+        setRide(prev => {
+          if (prev?.status !== updatedRide.status) {
+            toast.info(`Ride status: ${updatedRide.status.toUpperCase()}`);
+          }
+          return updatedRide;
+        });
+        if (!payload.old.driver_id && updatedRide.driver_id) {
+          fetchDriverInfo(updatedRide.driver_id);
         }
       })
       .subscribe();
 
+    // --- Polling fallback (guaranteed — runs every 4s) ---
+    // Realtime can silently fail due to RLS or replication config.
+    // Polling ensures the rider always sees updates.
+    const pollInterval = setInterval(async () => {
+      const { data } = await supabase
+        .from('rides')
+        .select('*')
+        .eq('id', rideId)
+        .single();
+
+      if (data) {
+        setRide(prev => {
+          if (!prev) return data;
+          // Only update state & fetch driver info if something changed
+          if (prev.status !== data.status) {
+            toast.info(`Ride status: ${data.status.toUpperCase()}`);
+          }
+          if (!prev.driver_id && data.driver_id) {
+            fetchDriverInfo(data.driver_id);
+          }
+          return data;
+        });
+      }
+    }, 4000);
+
     return () => {
       supabase.removeChannel(channel);
+      clearInterval(pollInterval);
     };
   }, [rideId, navigate]);
 
