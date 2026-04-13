@@ -141,6 +141,7 @@ const Login = () => {
 
   const handleGoogleSignIn = async () => {
     try {
+      localStorage.setItem('intended_role', role);
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {

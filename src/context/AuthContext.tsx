@@ -53,6 +53,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     const fetchUserRole = async (userId: string) => {
         try {
+            // Process intended role from OAuth sign-ups
+            const intendedRole = localStorage.getItem('intended_role');
+            if (intendedRole) {
+                const { error: updateError } = await supabase
+                    .from("profiles")
+                    .update({ role: intendedRole })
+                    .eq("id", userId);
+                
+                if (!updateError) {
+                    console.log(`[Auth] Automatically assigned user ${userId} to role: ${intendedRole}`);
+                    localStorage.removeItem('intended_role');
+                }
+            }
+
             const { data, error } = await supabase
                 .from("profiles")
                 .select("role")
