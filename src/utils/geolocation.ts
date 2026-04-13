@@ -10,6 +10,7 @@ const DEFAULT_CENTER = { lat: 19.0760, lng: 72.8777 }; // Mumbai
 export const getReliableLocation = async (): Promise<LocationInfo> => {
   // Layer 1: Browser GPS (High Accuracy)
   try {
+    console.log('📍 [Geolocation] Trying Layer 1: High-accuracy GPS...');
     const position = await new Promise<GeolocationPosition>((resolve, reject) => {
       navigator.geolocation.getCurrentPosition(resolve, reject, {
         enableHighAccuracy: true,
@@ -17,17 +18,18 @@ export const getReliableLocation = async (): Promise<LocationInfo> => {
         maximumAge: 0
       });
     });
-    console.log("📍 Location detected via High-Accuracy GPS");
+    console.log(`✅ [Geolocation] GPS success: lat=${position.coords.latitude}, lng=${position.coords.longitude}, accuracy=${position.coords.accuracy}m`);
     return {
       lat: position.coords.latitude,
       lng: position.coords.longitude,
       accuracy: position.coords.accuracy,
       source: "gps"
     };
-  } catch (gpsError) {
-    console.warn("High-accuracy GPS failed, trying standard accuracy...");
-    // Layer 1.5: Standard Accuracy (Often works better if GPS Signal is weak or on Mac/Safari)
+  } catch (gpsError: any) {
+    console.warn(`⚠️ [Geolocation] High-accuracy GPS failed (code=${gpsError.code}): ${gpsError.message}`);
+    // Layer 1.5: Standard Accuracy
     try {
+        console.log('📍 [Geolocation] Trying Layer 1.5: Standard-accuracy GPS...');
         const position = await new Promise<GeolocationPosition>((resolve, reject) => {
           navigator.geolocation.getCurrentPosition(resolve, reject, {
             enableHighAccuracy: false,
@@ -35,15 +37,15 @@ export const getReliableLocation = async (): Promise<LocationInfo> => {
             maximumAge: 10000
           });
         });
-        console.log("📍 Location detected via Standard GPS");
+        console.log(`✅ [Geolocation] Standard GPS success: lat=${position.coords.latitude}, lng=${position.coords.longitude}`);
         return {
           lat: position.coords.latitude,
           lng: position.coords.longitude,
           accuracy: position.coords.accuracy,
           source: "gps"
         };
-    } catch (stdError) {
-        console.warn("Standard GPS failed, trying IP fallback...");
+    } catch (stdError: any) {
+        console.warn(`⚠️ [Geolocation] Standard GPS also failed (code=${stdError.code}): ${stdError.message} — trying IP fallback`);
     }
   }
 
@@ -57,10 +59,14 @@ export const getReliableLocation = async (): Promise<LocationInfo> => {
 
   for (const provider of ipProviders) {
     try {
-      console.log(`Trying IP Provider: ${provider.url}`);
-      const res = await fetch(provider.url, { timeout: 3000 } as any);
+      console.log(`📍 [Geolocation] Trying Layer 2: IP provider — ${provider.url}`);
+      const res = await fetch(provider.url, { signal: AbortSignal.timeout(3000) } as any);
       if (res.status === 429) {
-          console.warn(`${provider.url} rate limited (429), skipping...`);
+          console.warn(`⚠️ [Geolocation] ${provider.url} rate-limited (429) — skipping`);
+          continue;
+      }
+      if (!res.ok) {
+          console.warn(`⚠️ [Geolocation] ${provider.url} returned HTTP ${res.status} — skipping`);
           continue;
       }
       const data = await res.json();
@@ -68,24 +74,27 @@ export const getReliableLocation = async (): Promise<LocationInfo> => {
       const lng = data[provider.lngRef];
 
       if (lat && lng) {
-        console.log("📍 Location detected via IP Fallback:", provider.url);
+        console.log(`✅ [Geolocation] IP location from ${provider.url}: lat=${lat}, lng=${lng}`);
         return {
           lat: parseFloat(lat),
           lng: parseFloat(lng),
           accuracy: null,
           source: "ip"
         };
+      } else {
+        console.warn(`⚠️ [Geolocation] ${provider.url} responded but lat/lng missing in JSON:`, data);
       }
     } catch (e) {
-      console.warn(`Provider ${provider.url} failed:`, e);
+      console.warn(`⚠️ [Geolocation] ${provider.url} request failed (timeout or network):`, e);
     }
   }
 
   // Layer 3: Default Center (Mumbai)
-  console.log("⚠️ Using default fallback location");
+  console.warn('⚠️ [Geolocation] All location methods failed — using Mumbai default. Map center will be inaccurate.');
   return {
     ...DEFAULT_CENTER,
     accuracy: null,
     source: "default"
   };
 };
+

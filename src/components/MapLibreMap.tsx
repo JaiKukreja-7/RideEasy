@@ -53,6 +53,7 @@ const MapLibreMap: React.FC<MapProps> = ({
   useEffect(() => {
     if (map.current || !mapContainer.current) return;
 
+    console.log('🗺️ [Map] Initializing MapLibre GL map...');
     map.current = new maplibregl.Map({
       container: mapContainer.current,
       style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
@@ -64,13 +65,18 @@ const MapLibreMap: React.FC<MapProps> = ({
     map.current.addControl(new maplibregl.AttributionControl(), 'bottom-left');
 
     map.current.on('load', () => {
-      console.log("MapLibre: Map loaded");
-      drawRoute(); 
+      console.log('✅ [Map] Map fully loaded — drawing initial routes');
+      drawRoute();
       map.current?.resize();
     });
 
     map.current.on('styledata', () => {
-      drawRoute(); 
+      console.log('🎨 [Map] Style data updated — re-drawing routes');
+      drawRoute();
+    });
+
+    map.current.on('error', (e) => {
+      console.error('🔴 [Map] MapLibre internal error:', e.error?.message ?? e);
     });
 
     map.current.on('click', (e) => {
@@ -78,6 +84,7 @@ const MapLibreMap: React.FC<MapProps> = ({
     });
 
     return () => {
+      console.log('🧹 [Map] Removing map instance');
       map.current?.remove();
       map.current = null;
     };
@@ -148,22 +155,29 @@ const MapLibreMap: React.FC<MapProps> = ({
   }, [drivers]);
 
   const drawRoute = () => {
-    if (!map.current) return;
+    if (!map.current) { console.warn('⚠️ [Map] drawRoute called but map is null — skipping'); return; }
     if (!map.current.isStyleLoaded()) {
+      console.log('⏳ [Map] Style not loaded yet — queuing drawRoute on style.load');
       map.current.once('style.load', drawRoute);
       return;
     }
 
     // 1. FULL ROUTE (THE TOTAL PATH — faint dashed line)
     if (fullRoute && fullRoute.length > 0) {
-      console.log("FULL ROUTE:", fullRoute.length, "points");
+      console.log(`🗺️ [Map] Drawing full route: ${fullRoute.length} points`);
       const sourceId = 'full-route-source';
       const layerId  = 'full-route-layer';
       const geojson: any = { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: fullRoute }};
       
       if (map.current.getSource(sourceId)) {
-        try { (map.current.getSource(sourceId) as any).setData(geojson); } catch(_) {}
+        try {
+          (map.current.getSource(sourceId) as any).setData(geojson);
+          console.log('✅ [Map] Full route source updated via setData');
+        } catch(e) {
+          console.error('🔴 [Map] setData on full-route-source threw — probable MapLibre internal crash:', e);
+        }
       } else {
+        console.log('🏗️ [Map] Creating full-route-source and layer for the first time');
         map.current.addSource(sourceId, { type: 'geojson', data: geojson });
         map.current.addLayer({
           id: layerId, type: 'line', source: sourceId,
@@ -172,21 +186,29 @@ const MapLibreMap: React.FC<MapProps> = ({
         });
       }
       if (map.current.getLayer(layerId)) map.current.moveLayer(layerId);
+    } else {
+      console.log('⏭️ [Map] No fullRoute data — skipping full route draw');
     }
 
     // 2. ACTIVE ROUTE (REMAINING PATH — solid black)
     // lineMetrics intentionally omitted — it causes 'jt is not defined' crash
     // in MapLibre when setData() is called after line-gradient is applied.
     if (route && route.length > 0) {
-      console.log("ACTIVE ROUTE:", route.length, "points");
+      console.log(`🗺️ [Map] Drawing active route: ${route.length} points`);
       const sourceId = 'active-route-source';
       const layerId  = 'active-route-layer';
       const casingId = 'active-route-casing';
       const geojson: any = { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: route }};
 
       if (map.current.getSource(sourceId)) {
-        try { (map.current.getSource(sourceId) as any).setData(geojson); } catch(_) {}
+        try {
+          (map.current.getSource(sourceId) as any).setData(geojson);
+          console.log('✅ [Map] Active route source updated via setData');
+        } catch(e) {
+          console.error('🔴 [Map] setData on active-route-source threw — probable MapLibre internal crash:', e);
+        }
       } else {
+        console.log('🏗️ [Map] Creating active-route-source, casing and main layer for the first time');
         map.current.addSource(sourceId, { type: 'geojson', data: geojson });
         map.current.addLayer({
           id: casingId, type: 'line', source: sourceId,
@@ -201,6 +223,8 @@ const MapLibreMap: React.FC<MapProps> = ({
       }
       if (map.current.getLayer(casingId)) map.current.moveLayer(casingId);
       if (map.current.getLayer(layerId))  map.current.moveLayer(layerId);
+    } else {
+      console.log('⏭️ [Map] No active route data — skipping active route draw');
     }
   };
 

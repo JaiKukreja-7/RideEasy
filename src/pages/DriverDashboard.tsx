@@ -435,33 +435,54 @@ const DriverDashboard = () => {
 
     useEffect(() => {
         if (isOnline) {
+            console.log('🟢 [Driver] Driver is ONLINE — fetching available rides');
             fetchAvailableRides();
         } else {
+            console.log('🔴 [Driver] Driver is OFFLINE — clearing available rides');
             setAvailableRides([]);
         }
         fetchHistory();
 
+        console.log('📡 [Driver] Subscribing to public:rides for new ride requests');
         const channel = supabase.channel('public:rides')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'rides' }, () => {
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'rides' }, (payload) => {
+                console.log(`📡 [Driver] rides table change detected — event: ${payload.eventType}, status: ${(payload.new as any)?.status ?? 'unknown'}`);
                 if (isOnline) fetchAvailableRides();
                 fetchHistory();
-            }).subscribe();
+            })
+            .subscribe((status) => {
+                console.log(`📡 [Driver] Realtime subscription status: ${status}`);
+                if (status === 'CHANNEL_ERROR') {
+                    console.error('🔴 [Driver] Realtime subscription FAILED — driver will not see new ride requests automatically');
+                }
+            });
 
         return () => { supabase.removeChannel(channel); };
     }, [user, isOnline]);
 
     const fetchAvailableRides = async () => {
-        const { data } = await supabase.from("rides").select("*").eq("status", "requested").order("created_at", { ascending: false });
+        const { data, error } = await supabase.from("rides").select("*").eq("status", "requested").order("created_at", { ascending: false });
+        if (error) {
+            console.error('🔴 [Driver] fetchAvailableRides FAILED (RLS may block this):', error.message);
+            return;
+        }
+        console.log(`🚖 [Driver] Available rides: ${data?.length ?? 0} ride(s) with status=requested`);
         setAvailableRides(data || []);
     };
 
     const fetchHistory = async () => {
         if (!user) return;
-        const { data } = await supabase.from("rides").select("*").eq("driver_id", user.id).order("created_at", { ascending: false });
+        const { data, error } = await supabase.from("rides").select("*").eq("driver_id", user.id).order("created_at", { ascending: false });
+        if (error) {
+            console.error('🔴 [Driver] fetchHistory FAILED:', error.message);
+            return;
+        }
 
         const rides = data || [];
+        const activeFound = rides.find(r => ['accepted', 'arrived', 'in_progress'].includes(r.status));
+        console.log(`📋 [Driver] fetchHistory: ${rides.length} total rides | active: ${activeFound ? `${activeFound.id} (${activeFound.status})` : 'none'}`);
         setRideHistory(rides);
-        setActiveRide(rides.find(r => ['accepted', 'arrived', 'in_progress'].includes(r.status)) || null);
+        setActiveRide(activeFound || null);
 
         const completedRides = rides.filter(r => r.status === 'completed');
         const todayStr = new Date().toDateString();
@@ -476,11 +497,7 @@ const DriverDashboard = () => {
         const last7Days = Array.from({length: 7}, (_, i) => {
             const d = new Date();
             d.setDate(d.getDate() - i);
-            return {
-                fullDate: d.toDateString(),
-                day: days[d.getDay()],
-                amount: 0
-            };
+            return { fullDate: d.toDateString(), day: days[d.getDay()], amount: 0 };
         }).reverse();
 
         last7Days.forEach(dayObj => {
@@ -489,12 +506,7 @@ const DriverDashboard = () => {
                 .reduce((sum, r) => sum + Number(r.fare_amount), 0);
             dayObj.amount = dayTotal;
         });
-
         setWeeklyEarningsData(last7Days.map(d => ({ day: d.day, amount: d.amount })));
-
-        // Acceptance Rate (Completed / (Completed + Cancelled by Driver?))
-        // For now, let's just use a ratio of completed to total seen if we track offered. 
-        // Simple fallback: if total > 0, mock it slightly based on completed vs attempted.
         setAcceptanceRate(rides.length > 0 ? Math.round((completedRides.length / rides.length) * 100) : 0);
 
         // Fetch Rating
@@ -582,25 +594,40 @@ const DriverDashboard = () => {
     const handleUpdateRideStatus = async (rideId: string, status: string) => {
         if (!user) return;
         const currentStatus = (activeRide?.id === rideId ? activeRide.status : 'requested');
-        if (!isValidTransition(currentStatus as any, status as any)) return;
+        console.log(`🔄 [Driver] Attempting status update: ${currentStatus} → ${status} for ride: ${rideId}`);
+
+        if (!isValidTransition(currentStatus as any, status as any)) {
+            console.warn(`⛔ [Driver] Invalid transition: ${currentStatus} → ${status} — blocked by rideLogic.isValidTransition`);
+            return;
+        }
 
         try {
             const updateData: any = { status };
             if (status === 'accepted') updateData.driver_id = user.id;
 
-            await supabase.from('rides').update(updateData).eq('id', rideId);
+            const { error: updateError } = await supabase.from('rides').update(updateData).eq('id', rideId);
+            if (updateError) {
+                console.error(`🔴 [Driver] Supabase UPDATE failed for ride ${rideId}:`, updateError.message, updateError.code);
+                toast.error("Failed to update status");
+                return;
+            }
+            console.log(`✅ [Driver] DB updated — ride ${rideId} is now: ${status}`);
 
             if (status === 'accepted') {
-                await supabase.from('driver_locations').update({ is_busy: true }).eq('user_id', user.id);
+                const { error: locError } = await supabase.from('driver_locations').update({ is_busy: true }).eq('user_id', user.id);
+                if (locError) console.warn('⚠️ [Driver] Failed to set is_busy=true on driver_locations:', locError.message);
+                console.log(`🚕 [Driver] Marked driver as busy. Rider should see update within 4s via polling.`);
                 toast.success("Ride accepted!");
             } else if (status === 'completed' || status === 'cancelled') {
-                await supabase.from('driver_locations').update({ is_busy: false }).eq('user_id', user.id);
+                const { error: locError } = await supabase.from('driver_locations').update({ is_busy: false }).eq('user_id', user.id);
+                if (locError) console.warn('⚠️ [Driver] Failed to set is_busy=false on driver_locations:', locError.message);
                 toast.success(`Ride ${status}`);
             }
 
             fetchAvailableRides();
             fetchHistory();
         } catch (err) {
+            console.error('🔴 [Driver] handleUpdateRideStatus threw unexpectedly:', err);
             toast.error("Failed to update status");
         }
     };

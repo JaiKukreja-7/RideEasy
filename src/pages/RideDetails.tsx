@@ -72,14 +72,17 @@ const RideDetails = () => {
 
   useEffect(() => {
     if (!rideId) {
+      console.error('🔴 [RideDetails] No rideId in URL params — redirecting to home');
       toast.error("No ride ID found");
       navigate("/home");
       return;
     }
 
+    console.log(`🚀 [RideDetails] Mounting for rideId: ${rideId}`);
     fetchRideDetails();
 
     // --- Realtime subscription (primary) ---
+    console.log(`📡 [Realtime] Subscribing to ride updates for: ${rideId}`);
     const channel = supabase
       .channel(`ride:${rideId}`)
       .on('postgres_changes', {
@@ -88,45 +91,66 @@ const RideDetails = () => {
         table: 'rides',
         filter: `id=eq.${rideId}`
       }, (payload) => {
+        console.log('📡 [Realtime] Ride UPDATE received:', {
+          oldStatus: payload.old.status,
+          newStatus: payload.new.status,
+          driverAssigned: !payload.old.driver_id && !!payload.new.driver_id
+        });
         const updatedRide = payload.new as Ride;
         setRide(prev => {
           if (prev?.status !== updatedRide.status) {
+            console.log(`🔄 [Realtime] Status changed: ${prev?.status} → ${updatedRide.status}`);
             toast.info(`Ride status: ${updatedRide.status.toUpperCase()}`);
           }
           return updatedRide;
         });
         if (!payload.old.driver_id && updatedRide.driver_id) {
+          console.log(`👤 [Realtime] Driver just assigned: ${updatedRide.driver_id} — fetching driver info`);
           fetchDriverInfo(updatedRide.driver_id);
         }
       })
-      .subscribe();
+      .subscribe((status) => {
+        console.log(`📡 [Realtime] Subscription status: ${status}`);
+        if (status === 'CHANNEL_ERROR') {
+          console.error('🔴 [Realtime] Channel error — will rely on polling fallback');
+        }
+      });
 
     // --- Polling fallback (guaranteed — runs every 4s) ---
-    // Realtime can silently fail due to RLS or replication config.
-    // Polling ensures the rider always sees updates.
+    console.log('⏱️ [Polling] Starting 4s polling fallback for ride status');
     const pollInterval = setInterval(async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('rides')
         .select('*')
         .eq('id', rideId)
         .single();
 
+      if (error) {
+        console.error('🔴 [Polling] Supabase fetch failed (RLS may be blocking):', error.message, error.code);
+        return;
+      }
+
       if (data) {
+        console.log(`⏱️ [Polling] Ride status from DB: ${data.status} | driver_id: ${data.driver_id ?? 'none'}`);
         setRide(prev => {
           if (!prev) return data;
-          // Only update state & fetch driver info if something changed
           if (prev.status !== data.status) {
+            console.log(`🔄 [Polling] Status changed: ${prev.status} → ${data.status}`);
             toast.info(`Ride status: ${data.status.toUpperCase()}`);
           }
           if (!prev.driver_id && data.driver_id) {
+            console.log(`👤 [Polling] Driver assigned: ${data.driver_id} — fetching driver info`);
             fetchDriverInfo(data.driver_id);
           }
           return data;
         });
+      } else {
+        console.warn('⚠️ [Polling] No data returned — ride may not exist or RLS is blocking read');
       }
     }, 4000);
 
     return () => {
+      console.log(`🧹 [RideDetails] Cleaning up subscriptions for rideId: ${rideId}`);
       supabase.removeChannel(channel);
       clearInterval(pollInterval);
     };
@@ -135,32 +159,41 @@ const RideDetails = () => {
   // Fetch Route when ride data is available
   useEffect(() => {
     if (ride?.pickup_lat && ride?.dropoff_lat) {
-      console.log("Fetching root for ride:", ride.id);
+      console.log(`🗺️ [Route] Fetching full trip route for ride: ${ride.id}`);
+      console.log(`🗺️ [Route] Pickup: (${ride.pickup_lat}, ${ride.pickup_lng}) → Dropoff: (${ride.dropoff_lat}, ${ride.dropoff_lng})`);
       fetchRoute(ride.pickup_lat, ride.pickup_lng, ride.dropoff_lat, ride.dropoff_lng);
+    } else {
+      console.warn('⚠️ [Route] Cannot fetch route — missing pickup or dropoff coordinates on ride');
     }
-  }, [ride?.id]); // Only refetch full route if ride ID changes
+  }, [ride?.id]);
 
   // Watch driver location
   useEffect(() => {
     if (ride?.driver_id) {
-       console.log("Starting driver subscription for:", ride.driver_id);
+       console.log(`📍 [DriverTrack] Starting location subscription for driver: ${ride.driver_id}`);
        const cleanup = subscribeToDriver(ride.driver_id);
-       return () => {
-         cleanup();
-       };
+       return () => { cleanup(); };
+    } else {
+      console.log('⏳ [DriverTrack] No driver assigned yet — waiting for assignment');
     }
   }, [ride?.driver_id]);
 
   const subscribeToDriver = (driverId: string) => {
-     // Fetch initial
-     supabase.from('driver_locations').select('*').eq('user_id', driverId).single().then(({data}) => {
+     // Fetch initial location
+     supabase.from('driver_locations').select('*').eq('user_id', driverId).single().then(({data, error}) => {
+        if (error) {
+          console.error(`🔴 [DriverTrack] Failed to fetch initial driver location for ${driverId}:`, error.message);
+          return;
+        }
         if (data) {
-            console.log("Initial driver loc:", data.lat, data.lng);
+            console.log(`📍 [DriverTrack] Initial driver location: lat=${data.lat}, lng=${data.lng}`);
             setDriverLoc({lat: Number(data.lat), lng: Number(data.lng)});
+        } else {
+            console.warn(`⚠️ [DriverTrack] No driver_locations row found for driver: ${driverId}`);
         }
      });
 
-     // Listen
+     // Subscribe to live location changes
      const channel = supabase.channel(`driver-track-${driverId}`)
         .on('postgres_changes', { 
             event: 'UPDATE', 
@@ -168,13 +201,18 @@ const RideDetails = () => {
             table: 'driver_locations', 
             filter: `user_id=eq.${driverId}` 
         }, (payload) => {
-            console.log("Driver moved:", payload.new.lat, payload.new.lng);
+            console.log(`🚗 [DriverTrack] Driver moved → lat=${payload.new.lat}, lng=${payload.new.lng}`);
             setDriverLoc({lat: Number(payload.new.lat), lng: Number(payload.new.lng)});
         })
-        .subscribe();
+        .subscribe((status) => {
+          console.log(`📡 [DriverTrack] Subscription status: ${status}`);
+          if (status === 'CHANNEL_ERROR') {
+            console.error(`🔴 [DriverTrack] Failed to subscribe to driver location for: ${driverId}`);
+          }
+        });
         
      return () => {
-        console.log("Cleaning up driver subscription");
+        console.log(`🧹 [DriverTrack] Cleaning up driver location subscription for: ${driverId}`);
         supabase.removeChannel(channel);
      };
   };
@@ -193,44 +231,66 @@ const RideDetails = () => {
         const destLat = isHeComingToMe ? ride.pickup_lat : ride.dropoff_lat;
         const destLng = isHeComingToMe ? ride.pickup_lng : ride.dropoff_lng;
 
-        console.log(`OSRM ETA request: from driver(${driverLoc.lat}, ${driverLoc.lng}) to ${isHeComingToMe ? 'pickup' : 'dropoff'}`);
+        if (!destLat || !destLng) {
+          console.warn(`⚠️ [ETA] Cannot compute ETA — destination coords missing. ride.status=${ride.status}`);
+          return;
+        }
+
+        console.log(`🧮 [ETA] Computing ETA | mode=${isHeComingToMe ? 'driver→pickup' : 'driver→dropoff'} | from=(${driverLoc.lat},${driverLoc.lng}) to=(${destLat},${destLng})`);
         
         const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${driverLoc.lng},${driverLoc.lat};${destLng},${destLat}?overview=full&geometries=geojson`);
+        if (!res.ok) {
+          console.error(`🔴 [ETA] OSRM returned HTTP ${res.status} — routing server may be down`);
+          return;
+        }
         const data = await res.json();
         if (data.routes && data.routes[0]) {
             const route = data.routes[0];
+            console.log(`✅ [ETA] Updated: ${(route.distance/1000).toFixed(2)}km, ${Math.round(route.duration/60)}min`);
             setLiveStats({
                 distance: route.distance / 1000,
                 duration: route.duration / 60
             });
-            // Update route path to be from driver to destination
             setRoutePath(route.geometry.coordinates);
+        } else {
+            console.warn('⚠️ [ETA] OSRM returned no routes — check coordinates for bad values (wrong city?)');
         }
       } catch (e) {
-          console.error("OSRM Live Update Error:", e);
+          console.error('🔴 [ETA] OSRM request completely failed (network error or CORS):', e);
       }
   };
 
   const fetchRoute = async (startLat: number, startLng: number, endLat: number, endLng: number) => {
+    console.log(`🗺️ [fetchRoute] Requesting OSRM route: (${startLat},${startLng}) → (${endLat},${endLng})`);
+    if (!startLat || !startLng || !endLat || !endLng) {
+      console.error('🔴 [fetchRoute] One or more coordinates are 0/null — ride data is probably corrupt. Cancel and rebook.');
+      return;
+    }
     try {
       const url = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
       const res = await fetch(url);
+      if (!res.ok) {
+        console.error(`🔴 [fetchRoute] OSRM HTTP ${res.status} — routing server down or bad request`);
+        return;
+      }
       const data = await res.json();
 
       if (data.routes && data.routes.length > 0) {
         const coordinates = data.routes[0].geometry.coordinates;
-        setRoutePath(coordinates); // Use native geojson coordinates [lng, lat]
-        setFullRoutePath(coordinates); // Save full trip line
-        
+        console.log(`✅ [fetchRoute] Got ${coordinates.length} route points | dist=${(data.routes[0].distance/1000).toFixed(1)}km | dur=${Math.round(data.routes[0].duration/60)}min`);
+        setRoutePath(coordinates);
+        setFullRoutePath(coordinates);
         if (liveStats.distance === 0) {
             setLiveStats({
                 distance: data.routes[0].distance / 1000,
                 duration: data.routes[0].duration / 60
             });
         }
+      } else {
+        console.warn('⚠️ [fetchRoute] OSRM returned no routes. Coordinates may point to different cities/countries — this is a data bug.');
       }
     } catch (e) {
-      console.error("Routing Error", e);
+      console.error('🔴 [fetchRoute] Network error calling OSRM:', e);
     }
   };
 
