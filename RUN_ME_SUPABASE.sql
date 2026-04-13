@@ -199,16 +199,17 @@ END $$;
 
 DO $$ 
 BEGIN
-  -- Add tables to realtime if not already present
-  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'rides') THEN
+  BEGIN
     ALTER PUBLICATION supabase_realtime ADD TABLE rides;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'driver_locations') THEN
+  EXCEPTION WHEN duplicate_object THEN NULL; END;
+  
+  BEGIN
     ALTER PUBLICATION supabase_realtime ADD TABLE driver_locations;
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'ride_messages') THEN
+  EXCEPTION WHEN duplicate_object THEN NULL; END;
+  
+  BEGIN
     ALTER PUBLICATION supabase_realtime ADD TABLE ride_messages;
-  END IF;
+  EXCEPTION WHEN duplicate_object THEN NULL; END;
 END $$;
 
 -- 6. GEOLOCATION HELPER
@@ -227,5 +228,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- 7. NOTIFY SCHEMA RELOAD
+-- 7. NOTIFY SCHEMA RELOAD & REPLICA IDENTITY
+ALTER TABLE driver_locations REPLICA IDENTITY FULL;
 NOTIFY pgrst, 'reload schema';

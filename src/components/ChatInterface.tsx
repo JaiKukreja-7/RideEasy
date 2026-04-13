@@ -12,7 +12,7 @@ interface Message {
   id: string;
   ride_id: string;
   sender_id: string;
-  content: string;
+  message: string;
   created_at: string;
 }
 
@@ -92,7 +92,7 @@ export const ChatInterface: React.FC<ChatProps> = ({ rideId, onClose, receiverNa
         .insert({
           ride_id: rideId,
           sender_id: user.id,
-          content: content
+          message: content
         });
 
       if (error) throw error;
@@ -141,7 +141,7 @@ export const ChatInterface: React.FC<ChatProps> = ({ rideId, onClose, receiverNa
                   }
                 `}>
                   <p className="text-sm font-bold leading-normal">
-                    {msg.content}
+                    {msg.message}
                   </p>
                   <p className={`text-[9px] mt-1 font-black uppercase opacity-40 ${msg.sender_id === user?.id ? 'text-right' : 'text-left'}`}>
                     {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

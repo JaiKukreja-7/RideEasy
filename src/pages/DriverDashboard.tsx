@@ -682,7 +682,7 @@ const DriverDashboard = () => {
                 if (idx >= coords.length) {
                     clearInterval(simulationRef.current!);
                     setIsSimulating(false);
-                    toast.success('✅ Simulation complete — driver reached destination');
+                    toast.success('✅ Destination reached');
                     return;
                 }
                 const [lng, lat] = coords[idx];
@@ -693,8 +693,8 @@ const DriverDashboard = () => {
                     is_busy: true,
                     updated_at: new Date().toISOString()
                 }, { onConflict: 'user_id' });
-                idx += STEP;
-            }, 1500);
+                idx += 3; // Smaller step for smoother animation
+            }, 600); // Faster updates for realism
 
         } catch (e) {
             toast.error('Simulation failed — check network');
