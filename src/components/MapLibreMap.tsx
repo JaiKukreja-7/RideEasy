@@ -157,8 +157,8 @@ const MapLibreMap: React.FC<MapProps> = ({
   const drawRoute = () => {
     if (!map.current) { console.warn('⚠️ [Map] drawRoute called but map is null — skipping'); return; }
     if (!map.current.isStyleLoaded()) {
-      console.log('⏳ [Map] Style not loaded yet — queuing drawRoute on style.load');
-      map.current.once('style.load', drawRoute);
+      console.log('⏳ [Map] Style not loaded yet — waiting 200ms to draw route...');
+      setTimeout(drawRoute, 200);
       return;
     }
 
