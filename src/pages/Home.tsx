@@ -16,7 +16,8 @@ import {
   History,
   Zap,
   Camera,
-  Loader2
+  Loader2,
+  X
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { useNavigate } from "react-router-dom";
@@ -352,6 +353,18 @@ const Home = () => {
     }
   };
 
+  const handleClearFavorite = async (label: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const { error } = await supabase.from('user_favorites').delete().eq('user_id', user?.id).eq('label', label);
+      if (error) throw error;
+      toast.success(`${label} cleared! Search a new place and tap ${label} to update.`);
+      fetchFavorites();
+    } catch (err: any) {
+      toast.error("Failed to clear location");
+    }
+  };
+
   const quickActions = [
     { icon: HomeIcon, label: "Home", color: "text-blue-500", onClick: () => handleQuickAction("Home") },
     { icon: Briefcase, label: "Work", color: "text-orange-500", onClick: () => handleQuickAction("Work") },
@@ -597,14 +610,16 @@ const Home = () => {
         <div className="animate-fade-in">
           <h3 className="font-bold text-sm mb-3">Quick Actions</h3>
           <div className="grid grid-cols-2 gap-3">
-            {quickActions.map((action, index) => (
+            {quickActions.map((action, index) => {
+              const isSet = userFavorites.some(f => f.label === action.label);
+              return (
               <Card
                 key={index}
-                className="card-taxi-interactive hover:bg-muted/50 transition-colors p-4"
+                className="card-taxi-interactive hover:bg-muted/50 transition-colors p-4 relative"
                 onClick={action.onClick}
               >
-                <div className="flex items-center space-x-3">
-                  <div className={`w-10 h-10 ${action.color?.replace('text', 'bg')}/10 rounded-xl flex items-center justify-center`}>
+                <div className="flex items-center space-x-3 pr-2">
+                  <div className={`w-10 h-10 ${action.color?.replace('text', 'bg')}/10 rounded-xl flex items-center justify-center shrink-0`}>
                     <action.icon className={`w-5 h-5 ${action.color}`} />
                   </div>
                   <div className="flex-1 overflow-hidden">
@@ -614,8 +629,16 @@ const Home = () => {
                     </p>
                   </div>
                 </div>
+                {isSet && action.label !== 'History' && (
+                  <button 
+                    onClick={(e) => handleClearFavorite(action.label, e)}
+                    className="absolute top-2 right-2 w-6 h-6 bg-muted/50 rounded-full flex items-center justify-center hover:bg-destructive/10 hover:text-destructive text-muted-foreground transition-colors"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
               </Card>
-            ))}
+            )})}
           </div>
         </div>
 
