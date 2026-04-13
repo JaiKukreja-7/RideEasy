@@ -165,7 +165,7 @@ const DriverDashboard = () => {
     }, [user, role, loading, navigate]);
 
     useEffect(() => {
-        if (!user || role !== 'driver') return;
+        if (!user || role !== 'driver' || isSimulating) return;
 
         const updateLocation = async () => {
             try {
@@ -199,7 +199,7 @@ const DriverDashboard = () => {
         return () => {
             clearInterval(intervalId);
         };
-    }, [user, role, activeRide, isOnline]);
+    }, [user, role, activeRide, isOnline, isSimulating]);
 
     useEffect(() => {
         const fetchUserData = async () => {
