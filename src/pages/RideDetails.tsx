@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { RatingDialog } from "@/components/RatingDialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -224,8 +224,18 @@ const RideDetails = () => {
     }
   }, [driverLoc, ride?.status]);
 
+  const lastOsrmCall = useRef<number>(0);
+
   const updateLiveETA = async () => {
       if (!driverLoc || !ride) return;
+      
+      const now = Date.now();
+      if (now - lastOsrmCall.current < 4000) {
+          // Skip hitting OSRM if called within last 4s to prevent Rate Limit (429) freezing
+          return;
+      }
+      lastOsrmCall.current = now;
+
       try {
         const isHeComingToMe = (ride.status === 'accepted' || ride.status === 'arrived');
         const destLat = isHeComingToMe ? ride.pickup_lat : ride.dropoff_lat;
@@ -240,7 +250,7 @@ const RideDetails = () => {
         
         const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${driverLoc.lng},${driverLoc.lat};${destLng},${destLat}?overview=full&geometries=geojson`);
         if (!res.ok) {
-          console.error(`🔴 [ETA] OSRM returned HTTP ${res.status} — routing server may be down`);
+          console.error(`🔴 [ETA] OSRM returned HTTP ${res.status} — routing server may be down or rate limited`);
           return;
         }
         const data = await res.json();
@@ -251,21 +261,17 @@ const RideDetails = () => {
                 distance: route.distance / 1000,
                 duration: route.duration / 60
             });
+            // ONLY update the route path directly from the car to destination 
             setRoutePath(route.geometry.coordinates);
-        } else {
-            console.warn('⚠️ [ETA] OSRM returned no routes — check coordinates for bad values (wrong city?)');
         }
       } catch (e) {
-          console.error('🔴 [ETA] OSRM request completely failed (network error or CORS):', e);
+          console.error('🔴 [ETA] OSRM request failed:', e);
       }
   };
 
   const fetchRoute = async (startLat: number, startLng: number, endLat: number, endLng: number) => {
     console.log(`🗺️ [fetchRoute] Requesting OSRM route: (${startLat},${startLng}) → (${endLat},${endLng})`);
-    if (!startLat || !startLng || !endLat || !endLng) {
-      console.error('🔴 [fetchRoute] One or more coordinates are 0/null — ride data is probably corrupt. Cancel and rebook.');
-      return;
-    }
+    if (!startLat || !startLng || !endLat || !endLng) return;
     try {
       const url = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
       const res = await fetch(url);
